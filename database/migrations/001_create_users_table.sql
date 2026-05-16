@@ -1,0 +1,27 @@
+-- NetaTrack India: Users Table
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(191) NOT NULL,
+  `email` VARCHAR(191) NOT NULL UNIQUE,
+  `password` VARCHAR(255) NOT NULL,
+  `phone` VARCHAR(20) DEFAULT NULL,
+  `avatar` VARCHAR(500) DEFAULT NULL,
+  `state` VARCHAR(100) DEFAULT NULL,
+  `district` VARCHAR(100) DEFAULT NULL,
+  `role_id` TINYINT UNSIGNED NOT NULL DEFAULT 3,
+  `credibility_score` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+  `total_submissions` INT UNSIGNED NOT NULL DEFAULT 0,
+  `approved_submissions` INT UNSIGNED NOT NULL DEFAULT 0,
+  `rejected_submissions` INT UNSIGNED NOT NULL DEFAULT 0,
+  `is_banned` TINYINT(1) NOT NULL DEFAULT 0,
+  `ban_reason` TEXT DEFAULT NULL,
+  `email_verified_at` TIMESTAMP NULL DEFAULT NULL,
+  `remember_token` VARCHAR(100) DEFAULT NULL,
+  `last_login_at` TIMESTAMP NULL DEFAULT NULL,
+  `last_login_ip` VARCHAR(45) DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_users_email` (`email`),
+  INDEX `idx_users_role` (`role_id`),
+  INDEX `idx_users_state` (`state`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,0 +1,26 @@
+-- NetaTrack India: AI Collected Data Table (Scraper Queue)
+CREATE TABLE IF NOT EXISTS `ai_collected_data` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `source_url` VARCHAR(1000) NOT NULL,
+  `source_type` ENUM('government','party','news','social','election','tender','parliament','other') NOT NULL DEFAULT 'other',
+  `scrape_method` ENUM('static','dynamic','scrapy','selenium','ocr','ffmpeg') NOT NULL DEFAULT 'static',
+  `raw_content` LONGTEXT DEFAULT NULL,
+  `extracted_type` ENUM('promise','project','corruption','scheme','budget','election','manifesto','speech','other') DEFAULT NULL,
+  `extracted_data` JSON DEFAULT NULL,
+  `leader_id` BIGINT UNSIGNED DEFAULT NULL,
+  `state_id` SMALLINT UNSIGNED DEFAULT NULL,
+  `ai_model_used` VARCHAR(100) DEFAULT NULL,
+  `ai_confidence` DECIMAL(5,2) DEFAULT NULL,
+  `is_duplicate` TINYINT(1) DEFAULT 0,
+  `duplicate_of` BIGINT UNSIGNED DEFAULT NULL,
+  `status` ENUM('scraped','ai_processing','ai_done','duplicate','approved','rejected','published') NOT NULL DEFAULT 'scraped',
+  `admin_notes` TEXT DEFAULT NULL,
+  `approved_by` BIGINT UNSIGNED DEFAULT NULL,
+  `approved_at` TIMESTAMP NULL DEFAULT NULL,
+  `scraped_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_aidata_status` (`status`),
+  INDEX `idx_aidata_source` (`source_type`),
+  INDEX `idx_aidata_leader` (`leader_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,0 +1,22 @@
+-- NetaTrack India: Parties Table
+CREATE TABLE IF NOT EXISTS `parties` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(191) NOT NULL,
+  `abbreviation` VARCHAR(20) NOT NULL,
+  `slug` VARCHAR(191) NOT NULL UNIQUE,
+  `logo` VARCHAR(500) DEFAULT NULL,
+  `color_code` VARCHAR(10) DEFAULT NULL,
+  `ideology` VARCHAR(200) DEFAULT NULL,
+  `founded_year` YEAR DEFAULT NULL,
+  `headquarters` VARCHAR(200) DEFAULT NULL,
+  `national_president` VARCHAR(191) DEFAULT NULL,
+  `website` VARCHAR(500) DEFAULT NULL,
+  `is_national` TINYINT(1) NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `total_seats_lok_sabha` SMALLINT UNSIGNED DEFAULT 0,
+  `total_seats_rajya_sabha` SMALLINT UNSIGNED DEFAULT 0,
+  `description` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_parties_slug` (`slug`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
