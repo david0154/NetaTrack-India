@@ -1,53 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execute, query } from '@/lib/db';
-import pool from '@/lib/db';
+import { query, queryOne } from '@/lib/db';
+import { verifyJWT } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const sp     = new URL(req.url).searchParams;
-    const page   = Math.max(1, Number(sp.get('page')  || 1));
-    const limit  = Math.min(50, Number(sp.get('limit') || 20));
-    const offset = (page - 1) * limit;
-    const status = sp.get('status') || 'approved';
-
-    const rows = await query(
-      `SELECT id, title, leader_name, state, submission_type, status, created_at
-       FROM public_submissions WHERE status = ?
-       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [status, limit, offset]
-    );
-    const [[{ total }]] = await pool.execute(
-      `SELECT COUNT(*) AS total FROM public_submissions WHERE status = ?`, [status]
-    ) as any;
-
-    return NextResponse.json({
-      success: true, data: rows,
-      pagination: { page, limit, total: Number(total), pages: Math.ceil(Number(total)/limit) }
-    });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { title, leader_name, leader_id, state, description, submission_type, source_link } = body;
-
-    if (!title || !description || !submission_type || !state) {
-      return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 });
+    const token = req.cookies.get('nt_admin_token')?.value;
+    if (!token) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    const payload = verifyJWT(token);
+    if (!payload || !['super_admin','admin','moderator'].includes(payload.role)) {
+      return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
     }
-
-    const spamScore = description.length < 20 ? 80 : 10;
-
-    const result = await execute(
-      `INSERT INTO public_submissions
-       (title, leader_name, leader_id, state, description, submission_type, source_link, ai_spam_score, ai_fake_score, ai_verified, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10, 0, 'pending')`,
-      [title, leader_name || '', leader_id || null, state, description, submission_type, source_link || null, spamScore]
+    const sp = req.nextUrl.searchParams;
+    const status = sp.get('status') ?? 'pending';
+    const page = parseInt(sp.get('page') ?? '1');
+    const perPage = parseInt(sp.get('per_page') ?? '20');
+    const offset = (page - 1) * perPage;
+    const rows = await query<any>(
+      `SELECT * FROM public_reports WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [status, perPage, offset]
     );
-
-    return NextResponse.json({ success: true, message: 'Submission received. Under review.', id: result.insertId });
+    const countRow = await queryOne<any>(`SELECT COUNT(*) as total FROM public_reports WHERE status = ?`, [status]);
+    return NextResponse.json({ success: true, data: rows, pagination: { total: countRow?.total ?? 0, page, perPage } });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }

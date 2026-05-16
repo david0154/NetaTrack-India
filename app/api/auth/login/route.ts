@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne } from '@/lib/db';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { signJWT } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,17 +21,17 @@ export async function POST(req: NextRequest) {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return NextResponse.json({ success: false, error: 'Invalid credentials' }, { status: 401 });
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'netatrack_secret_2026',
-      { expiresIn: '7d' }
-    );
+    // Use unified custom JWT from lib/auth (no jsonwebtoken dependency needed)
+    const token = signJWT({ sub: user.id, email: user.email, role: user.role });
 
     const res = NextResponse.json({
       success: true,
       data: { id: user.id, name: user.name, email: user.email, role: user.role, credibility_score: user.credibility_score }
     });
-    res.cookies.set('nt_token', token, { httpOnly: true, secure: true, maxAge: 604800, path: '/' });
+
+    const isAdmin = ['super_admin', 'admin', 'moderator'].includes(user.role);
+    const cookieName = isAdmin ? 'nt_admin_token' : 'nt_token';
+    res.cookies.set(cookieName, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 604800, path: '/' });
     return res;
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });

@@ -1,41 +1,23 @@
-import { NextResponse } from 'next/server'
-import { query } from '@/lib/db'
-import { serverError } from '@/lib/apiResponse'
+import { NextResponse } from 'next/server';
+import { queryOne } from '@/lib/db';
 
-export const dynamic = 'force-dynamic'
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const [promises, projects, reports, leaders, corruption] = await Promise.all([
-      query('SELECT COUNT(*) as total, SUM(status="Completed") as completed, SUM(status="Broken") as broken FROM promises'),
-      query('SELECT COUNT(*) as total, SUM(status="Delayed") as delayed, SUM(status="Stalled") as stalled FROM projects'),
-      query('SELECT COUNT(*) as total, SUM(status="Approved") as approved FROM public_reports'),
-      query('SELECT COUNT(*) as total FROM leaders WHERE is_active=1'),
-      query('SELECT COUNT(*) as total FROM corruption_cases'),
-    ])
-
-    const p  = (promises[0]  as Record<string, number>)
-    const pr = (projects[0]  as Record<string, number>)
-    const r  = (reports[0]   as Record<string, number>)
-    const l  = (leaders[0]   as Record<string, number>)
-    const c  = (corruption[0] as Record<string, number>)
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        promises_tracked:       Number(p.total)       || 0,
-        promises_completed:     Number(p.completed)   || 0,
-        promises_broken:        Number(p.broken)      || 0,
-        projects_monitored:     Number(pr.total)      || 0,
-        delayed_projects:       Number(pr.delayed) + Number(pr.stalled) || 0,
-        corruption_allegations: Number(c.total)       || 0,
-        fake_claims_detected:   0,  // populated by AI scraper
-        verified_reports:       Number(r.approved)    || 0,
-        public_submissions:     Number(r.total)       || 0,
-        leaders_tracked:        Number(l.total)       || 0,
-      },
-    })
-  } catch (e) {
-    return serverError(e)
+    const stats = await queryOne<any>(`
+      SELECT
+        (SELECT COUNT(*) FROM promises WHERE is_active = 1) AS promises_tracked,
+        (SELECT COUNT(*) FROM projects WHERE is_active = 1) AS projects_monitored,
+        (SELECT COUNT(*) FROM projects WHERE status = 'delayed' AND is_active = 1) AS delayed_projects,
+        (SELECT COUNT(*) FROM corruption_cases) AS corruption_cases,
+        (SELECT COUNT(*) FROM public_reports WHERE ai_verified = 1 AND status = 'approved') AS verified_reports,
+        (SELECT COUNT(*) FROM public_reports WHERE ai_fake_score > 70) AS fake_claims_detected,
+        (SELECT COUNT(*) FROM public_reports) AS public_submissions,
+        (SELECT COUNT(*) FROM leaders WHERE is_active = 1) AS leaders_tracked
+    `);
+    return NextResponse.json({ success: true, data: stats });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
 }

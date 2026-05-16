@@ -39,14 +39,18 @@ export async function queryOne<T = Record<string, unknown>>(sql: string, params?
   return rows[0] ?? null
 }
 
+// Optimised paginate: strips ORDER BY from COUNT query to avoid expensive subquery
 export async function paginate<T = Record<string, unknown>>(
   baseSql: string,
   params: unknown[] = [],
   page = 1,
   perPage = 20
 ): Promise<{ data: T[]; total: number; page: number; perPage: number; totalPages: number }> {
-  const countSql = `SELECT COUNT(*) as total FROM (${baseSql}) as sub`
-  const countRow = await queryOne<{ total: number }>(countSql, params)
+  // Strip ORDER BY for count to improve performance
+  const countSql = baseSql.replace(/\s+ORDER\s+BY\s+.*/is, '')
+  const countRow = await queryOne<{ total: number }>(
+    `SELECT COUNT(*) as total FROM (${countSql}) as _count_sub`, params
+  )
   const total = countRow?.total ?? 0
   const offset = (page - 1) * perPage
   const data = await query<T>(`${baseSql} LIMIT ? OFFSET ?`, [...params, perPage, offset])

@@ -1,0 +1,22 @@
+{
+  "name": "david0154/netatrack-india-php",
+  "description": "NetaTrack India PHP scraper and backend utilities",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "phpmailer/phpmailer": "^6.9",
+    "guzzlehttp/guzzle": "^7.9",
+    "vlucas/phpdotenv": "^5.6"
+  },
+  "autoload": {
+    "psr-4": {
+      "": "src/"
+    }
+  },
+  "scripts": {
+    "collect": "php scripts/collect.php"
+  },
+  "config": {
+    "optimize-autoloader": true
+  }
+}

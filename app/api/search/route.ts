@@ -1,37 +1,23 @@
-import { NextRequest } from 'next/server'
-import { query } from '@/lib/db'
-import { ok, badRequest, serverError } from '@/lib/apiResponse'
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
-export const dynamic = 'force-dynamic'
+export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const q = request.nextUrl.searchParams.get('q')?.trim()
-    if (!q || q.length < 2) return badRequest('Query must be at least 2 characters')
-
-    const term = `%${q}%`
-    const boolTerm = `${q}*`
-
-    const [leaders, promises, projects] = await Promise.all([
-      query(
-        `SELECT id, name, slug, photo, designation, final_score, rank, 'leader' AS type
-         FROM leaders WHERE is_active=1 AND name LIKE ? ORDER BY final_score DESC LIMIT 5`,
-        [term]
-      ),
-      query(
-        `SELECT id, title, slug, status, category, 'promise' AS type
-         FROM promises WHERE MATCH(title, description) AGAINST(? IN BOOLEAN MODE) LIMIT 5`,
-        [boolTerm]
-      ),
-      query(
-        `SELECT id, title, slug, status, category, 'project' AS type
-         FROM projects WHERE MATCH(title, description) AGAINST(? IN BOOLEAN MODE) LIMIT 5`,
-        [boolTerm]
-      ),
-    ])
-
-    return ok({ leaders, promises, projects, query: q })
-  } catch (e) {
-    return serverError(e)
+    const q = req.nextUrl.searchParams.get('q')?.trim();
+    if (!q || q.length < 2) {
+      return NextResponse.json({ success: false, error: 'Query too short' }, { status: 400 });
+    }
+    const like = `%${q}%`;
+    const [leaders, promises, projects, corruptions] = await Promise.all([
+      query<any>(`SELECT id, slug, name, designation, final_score, rank FROM leaders WHERE name LIKE ? AND is_active=1 LIMIT 5`, [like]),
+      query<any>(`SELECT id, slug, title, status, category FROM promises WHERE title LIKE ? AND is_active=1 LIMIT 5`, [like]),
+      query<any>(`SELECT id, slug, title, status, progress_percent FROM projects WHERE title LIKE ? AND is_active=1 LIMIT 5`, [like]),
+      query<any>(`SELECT id, title, agency, severity, status FROM corruption_cases WHERE title LIKE ? LIMIT 5`, [like]),
+    ]);
+    return NextResponse.json({ success: true, data: { leaders, promises, projects, corruptions } });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
 }

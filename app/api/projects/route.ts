@@ -1,41 +1,36 @@
-import { NextRequest } from 'next/server'
-import { paginate } from '@/lib/db'
-import { ok, serverError } from '@/lib/apiResponse'
+import { NextRequest, NextResponse } from 'next/server';
+import { paginate } from '@/lib/db';
 
-export const dynamic = 'force-dynamic'
+export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const sp       = request.nextUrl.searchParams
-    const page     = parseInt(sp.get('page')    ?? '1')
-    const perPage  = parseInt(sp.get('per_page')?? '20')
-    const status   = sp.get('status')
-    const category = sp.get('category')
-    const stateId  = sp.get('state_id')
+    const sp = req.nextUrl.searchParams;
+    const page = parseInt(sp.get('page') ?? '1');
+    const perPage = parseInt(sp.get('per_page') ?? '20');
+    const stateId = sp.get('state_id');
+    const status = sp.get('status');
+    const search = sp.get('search');
 
     let sql = `
-      SELECT
-        pr.id, pr.title, pr.slug, pr.status, pr.category, pr.progress_percentage,
-        pr.budget_allocated, pr.budget_spent, pr.budget_efficiency,
-        pr.start_date, pr.expected_completion, pr.delay_days, pr.is_verified,
-        l.name AS leader_name, l.slug AS leader_slug,
-        s.name AS state_name, s.code AS state_code
+      SELECT pr.id, pr.slug, pr.title, pr.category, pr.budget, pr.spent,
+             pr.start_date, pr.expected_end_date, pr.status, pr.progress_percent,
+             l.name AS leader_name, l.slug AS leader_slug,
+             s.name AS state_name
       FROM projects pr
       LEFT JOIN leaders l ON l.id = pr.leader_id
-      LEFT JOIN states  s ON s.id = pr.state_id
-      WHERE 1=1
-    `
-    const params: unknown[] = []
+      LEFT JOIN states s ON s.id = pr.state_id
+      WHERE pr.is_active = 1
+    `;
+    const params: unknown[] = [];
+    if (stateId) { sql += ' AND pr.state_id = ?'; params.push(stateId); }
+    if (status)  { sql += ' AND pr.status = ?'; params.push(status); }
+    if (search)  { sql += ' AND pr.title LIKE ?'; params.push(`%${search}%`); }
+    sql += ' ORDER BY pr.created_at DESC';
 
-    if (status)   { sql += ' AND pr.status = ?';    params.push(status) }
-    if (category) { sql += ' AND pr.category = ?';  params.push(category) }
-    if (stateId)  { sql += ' AND pr.state_id = ?';  params.push(stateId) }
-
-    sql += ' ORDER BY pr.start_date DESC'
-
-    const result = await paginate(sql, params, page, perPage)
-    return ok(result.data, { pagination: { total: result.total, page, perPage, totalPages: result.totalPages } })
-  } catch (e) {
-    return serverError(e)
+    const result = await paginate(sql, params, page, perPage);
+    return NextResponse.json({ success: true, data: result.data, pagination: result });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
 }
