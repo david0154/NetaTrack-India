@@ -1,0 +1,45 @@
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    email VARCHAR(150) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(40) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS promises (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    state VARCHAR(120) NOT NULL,
+    category VARCHAR(120) NOT NULL,
+    budget DECIMAL(15,2) DEFAULT NULL,
+    deadline DATE DEFAULT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'pending',
+    verification_score INT DEFAULT 0,
+    source_name VARCHAR(160) NOT NULL,
+    source_url VARCHAR(500) NOT NULL,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public_submissions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    leader_name VARCHAR(160) NOT NULL,
+    state VARCHAR(120) NOT NULL,
+    description TEXT NOT NULL,
+    source_link VARCHAR(500) NOT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_collected_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    source_name VARCHAR(160) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content LONGTEXT,
+    ai_score INT DEFAULT 0,
+    status VARCHAR(40) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
