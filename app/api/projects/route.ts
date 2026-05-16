@@ -1,43 +1,41 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import pool from '@/lib/db';
+import { NextRequest } from 'next/server'
+import { paginate } from '@/lib/db'
+import { ok, serverError } from '@/lib/apiResponse'
 
-export async function GET(req: NextRequest) {
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
   try {
-    const sp     = new URL(req.url).searchParams;
-    const page   = Math.max(1, Number(sp.get('page')  || 1));
-    const limit  = Math.min(50, Number(sp.get('limit') || 20));
-    const offset = (page - 1) * limit;
-    const status = sp.get('status');
-    const state  = sp.get('state_id');
-    const search = sp.get('q');
+    const sp       = request.nextUrl.searchParams
+    const page     = parseInt(sp.get('page')    ?? '1')
+    const perPage  = parseInt(sp.get('per_page')?? '20')
+    const status   = sp.get('status')
+    const category = sp.get('category')
+    const stateId  = sp.get('state_id')
 
-    let where = 'WHERE 1=1';
-    const params: any[] = [];
-    if (status) { where += ' AND pj.status = ?';    params.push(status); }
-    if (state)  { where += ' AND pj.state_id = ?';  params.push(state); }
-    if (search) { where += ' AND pj.title LIKE ?';  params.push(`%${search}%`); }
+    let sql = `
+      SELECT
+        pr.id, pr.title, pr.slug, pr.status, pr.category, pr.progress_percentage,
+        pr.budget_allocated, pr.budget_spent, pr.budget_efficiency,
+        pr.start_date, pr.expected_completion, pr.delay_days, pr.is_verified,
+        l.name AS leader_name, l.slug AS leader_slug,
+        s.name AS state_name, s.code AS state_code
+      FROM projects pr
+      LEFT JOIN leaders l ON l.id = pr.leader_id
+      LEFT JOIN states  s ON s.id = pr.state_id
+      WHERE 1=1
+    `
+    const params: unknown[] = []
 
-    const projects = await query(
-      `SELECT pj.*, l.name AS leader_name, s.name AS state_name
-       FROM projects pj
-       LEFT JOIN leaders l ON l.id = pj.leader_id
-       LEFT JOIN states  s ON s.id = pj.state_id
-       ${where}
-       ORDER BY pj.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
+    if (status)   { sql += ' AND pr.status = ?';    params.push(status) }
+    if (category) { sql += ' AND pr.category = ?';  params.push(category) }
+    if (stateId)  { sql += ' AND pr.state_id = ?';  params.push(stateId) }
 
-    const [[{ total }]] = await pool.execute(
-      `SELECT COUNT(*) AS total FROM projects pj ${where}`, params
-    ) as any;
+    sql += ' ORDER BY pr.start_date DESC'
 
-    return NextResponse.json({
-      success: true, data: projects,
-      pagination: { page, limit, total: Number(total), pages: Math.ceil(Number(total)/limit) }
-    });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    const result = await paginate(sql, params, page, perPage)
+    return ok(result.data, { pagination: { total: result.total, page, perPage, totalPages: result.totalPages } })
+  } catch (e) {
+    return serverError(e)
   }
 }

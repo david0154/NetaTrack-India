@@ -1,29 +1,41 @@
-import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { NextResponse } from 'next/server'
+import { query } from '@/lib/db'
+import { serverError } from '@/lib/apiResponse'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const rows = await query<{k:string,v:number}>(`
-      SELECT 'promises_tracked'   AS k, COUNT(*) AS v FROM promises
-      UNION ALL
-      SELECT 'projects_monitored',  COUNT(*) FROM projects
-      UNION ALL
-      SELECT 'delayed_projects',    COUNT(*) FROM projects WHERE status='delayed'
-      UNION ALL
-      SELECT 'corruption_cases',    COUNT(*) FROM corruption_cases
-      UNION ALL
-      SELECT 'fake_claims_detected',COUNT(*) FROM promises WHERE status='fake'
-      UNION ALL
-      SELECT 'verified_reports',    COUNT(*) FROM public_submissions WHERE ai_verified=1 AND status='approved'
-      UNION ALL
-      SELECT 'public_submissions',  COUNT(*) FROM public_submissions
-      UNION ALL
-      SELECT 'leaders_tracked',     COUNT(*) FROM leaders WHERE is_active=1
-    `);
-    const data: Record<string,number> = {};
-    rows.forEach(r => { data[r.k] = Number(r.v); });
-    return NextResponse.json({ success: true, data });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    const [promises, projects, reports, leaders, corruption] = await Promise.all([
+      query('SELECT COUNT(*) as total, SUM(status="Completed") as completed, SUM(status="Broken") as broken FROM promises'),
+      query('SELECT COUNT(*) as total, SUM(status="Delayed") as delayed, SUM(status="Stalled") as stalled FROM projects'),
+      query('SELECT COUNT(*) as total, SUM(status="Approved") as approved FROM public_reports'),
+      query('SELECT COUNT(*) as total FROM leaders WHERE is_active=1'),
+      query('SELECT COUNT(*) as total FROM corruption_cases'),
+    ])
+
+    const p  = (promises[0]  as Record<string, number>)
+    const pr = (projects[0]  as Record<string, number>)
+    const r  = (reports[0]   as Record<string, number>)
+    const l  = (leaders[0]   as Record<string, number>)
+    const c  = (corruption[0] as Record<string, number>)
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        promises_tracked:       Number(p.total)       || 0,
+        promises_completed:     Number(p.completed)   || 0,
+        promises_broken:        Number(p.broken)      || 0,
+        projects_monitored:     Number(pr.total)      || 0,
+        delayed_projects:       Number(pr.delayed) + Number(pr.stalled) || 0,
+        corruption_allegations: Number(c.total)       || 0,
+        fake_claims_detected:   0,  // populated by AI scraper
+        verified_reports:       Number(r.approved)    || 0,
+        public_submissions:     Number(r.total)       || 0,
+        leaders_tracked:        Number(l.total)       || 0,
+      },
+    })
+  } catch (e) {
+    return serverError(e)
   }
 }

@@ -1,30 +1,54 @@
-import mysql from 'mysql2/promise';
+/**
+ * NetaTrack India - Database helper for Next.js API routes
+ * Uses mysql2 with connection pooling
+ */
+import mysql from 'mysql2/promise'
 
-const pool = mysql.createPool({
-  host:     process.env.DB_HOST     || 'localhost',
-  port:     Number(process.env.DB_PORT || 3306),
-  user:     process.env.DB_USER     || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME     || 'netatrack',
-  waitForConnections: true,
-  connectionLimit:    20,
-  queueLimit:         0,
-  timezone: '+05:30',
-});
-
-export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-  const [rows] = await pool.execute(sql, params);
-  return rows as T[];
+declare global {
+  // eslint-disable-next-line no-var
+  var _mysqlPool: mysql.Pool | undefined
 }
 
-export async function queryOne<T = any>(sql: string, params?: any[]): Promise<T | null> {
-  const rows = await query<T>(sql, params);
-  return rows[0] ?? null;
+function createPool(): mysql.Pool {
+  return mysql.createPool({
+    host:               process.env.DB_HOST     ?? '127.0.0.1',
+    port:               parseInt(process.env.DB_PORT ?? '3306'),
+    database:           process.env.DB_NAME     ?? 'netatrack_india',
+    user:               process.env.DB_USER     ?? 'root',
+    password:           process.env.DB_PASS     ?? '',
+    charset:            'utf8mb4',
+    waitForConnections: true,
+    connectionLimit:    10,
+    queueLimit:         0,
+    timezone:           '+05:30',
+  })
 }
 
-export async function execute(sql: string, params?: any[]): Promise<mysql.ResultSetHeader> {
-  const [result] = await pool.execute(sql, params);
-  return result as mysql.ResultSetHeader;
+const pool: mysql.Pool = global._mysqlPool ?? createPool()
+if (process.env.NODE_ENV !== 'production') global._mysqlPool = pool
+
+export default pool
+
+export async function query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
+  const [rows] = await pool.execute(sql, params)
+  return rows as T[]
 }
 
-export default pool;
+export async function queryOne<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null> {
+  const rows = await query<T>(sql, params)
+  return rows[0] ?? null
+}
+
+export async function paginate<T = Record<string, unknown>>(
+  baseSql: string,
+  params: unknown[] = [],
+  page = 1,
+  perPage = 20
+): Promise<{ data: T[]; total: number; page: number; perPage: number; totalPages: number }> {
+  const countSql = `SELECT COUNT(*) as total FROM (${baseSql}) as sub`
+  const countRow = await queryOne<{ total: number }>(countSql, params)
+  const total = countRow?.total ?? 0
+  const offset = (page - 1) * perPage
+  const data = await query<T>(`${baseSql} LIMIT ? OFFSET ?`, [...params, perPage, offset])
+  return { data, total, page, perPage, totalPages: Math.ceil(total / perPage) }
+}

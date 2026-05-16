@@ -1,34 +1,46 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { queryOne, query } from '@/lib/db';
+import { NextRequest } from 'next/server'
+import { query, queryOne } from '@/lib/db'
+import { ok, notFound, serverError } from '@/lib/apiResponse'
 
-export async function GET(_: NextRequest, { params }: { params: { slug: string } }) {
+export const dynamic = 'force-dynamic'
+
+export async function GET(_req: NextRequest, { params }: { params: { slug: string } }) {
   try {
-    const leader = await queryOne(
-      `SELECT l.*, p.name AS party_name, p.abbreviation AS party_abbr,
-              s.name AS state_name, s.capital AS state_capital
-       FROM leaders l
-       LEFT JOIN parties p ON p.id = l.party_id
-       LEFT JOIN states  s ON s.id = l.state_id
-       WHERE l.slug = ? AND l.is_active = 1`,
-      [params.slug]
-    );
-    if (!leader) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+    const leader = await queryOne(`
+      SELECT
+        l.*,
+        p.name AS party_name, p.abbreviation AS party_abbr, p.color_code, p.logo AS party_logo,
+        s.name AS state_name, s.code AS state_code
+      FROM leaders l
+      LEFT JOIN parties p ON p.id = l.party_id
+      LEFT JOIN states  s ON s.id = l.state_id
+      WHERE (l.slug = ? OR l.id = ?) AND l.is_active = 1
+    `, [params.slug, params.slug])
 
-    const promises = await query(
-      `SELECT id, slug, title, status, category, deadline, ai_confidence FROM promises WHERE leader_id = ? ORDER BY created_at DESC LIMIT 10`,
-      [(leader as any).id]
-    );
-    const projects = await query(
-      `SELECT id, slug, title, status, progress_percent, budget FROM projects WHERE leader_id = ? ORDER BY created_at DESC LIMIT 10`,
-      [(leader as any).id]
-    );
-    const corruption = await query(
-      `SELECT id, title, agency, severity, status, amount_crore FROM corruption_cases WHERE leader_id = ? ORDER BY created_at DESC LIMIT 5`,
-      [(leader as any).id]
-    );
+    if (!leader) return notFound('Leader not found')
 
-    return NextResponse.json({ success: true, data: { ...leader, promises, projects, corruption } });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    // Increment view count (best effort)
+    queryOne('UPDATE leaders SET views = views + 1 WHERE slug = ?', [params.slug]).catch(() => {})
+
+    const leaderId = (leader as Record<string, unknown>).id
+
+    const [promises, projects, corruptionCases] = await Promise.all([
+      query(`
+        SELECT id, title, slug, status, category, promised_on, deadline, completion_percentage, ai_summary
+        FROM promises WHERE leader_id = ? ORDER BY promised_on DESC LIMIT 20
+      `, [leaderId]),
+      query(`
+        SELECT id, title, slug, status, category, progress_percentage, budget_allocated, budget_spent, start_date, expected_completion
+        FROM projects WHERE leader_id = ? ORDER BY start_date DESC LIMIT 20
+      `, [leaderId]),
+      query(`
+        SELECT id, case_title, type, agency, status, amount_involved, started_at, ai_severity_score
+        FROM corruption_cases WHERE leader_id = ? ORDER BY started_at DESC
+      `, [leaderId]),
+    ])
+
+    return ok({ ...leader, promises, projects, corruption_cases: corruptionCases })
+  } catch (e) {
+    return serverError(e)
   }
 }

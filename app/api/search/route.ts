@@ -1,35 +1,37 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { NextRequest } from 'next/server'
+import { query } from '@/lib/db'
+import { ok, badRequest, serverError } from '@/lib/apiResponse'
 
-export async function GET(req: NextRequest) {
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
   try {
-    const q = new URL(req.url).searchParams.get('q') || '';
-    if (q.length < 2) return NextResponse.json({ success: true, data: [] });
+    const q = request.nextUrl.searchParams.get('q')?.trim()
+    if (!q || q.length < 2) return badRequest('Query must be at least 2 characters')
 
-    const like = `%${q}%`;
+    const term = `%${q}%`
+    const boolTerm = `${q}*`
 
-    const leaders = await query(
-      `SELECT id, slug, name, 'leader' AS type, position AS subtitle, final_score AS score
-       FROM leaders WHERE name LIKE ? AND is_active=1 LIMIT 5`, [like]
-    );
-    const promises = await query(
-      `SELECT id, slug, title AS name, 'promise' AS type, status AS subtitle, ai_confidence AS score
-       FROM promises WHERE title LIKE ? LIMIT 5`, [like]
-    );
-    const projects = await query(
-      `SELECT id, slug, title AS name, 'project' AS type, status AS subtitle, progress_percent AS score
-       FROM projects WHERE title LIKE ? LIMIT 5`, [like]
-    );
-    const cases = await query(
-      `SELECT id, id AS slug, title AS name, 'corruption' AS type, severity AS subtitle, 0 AS score
-       FROM corruption_cases WHERE title LIKE ? LIMIT 5`, [like]
-    );
+    const [leaders, promises, projects] = await Promise.all([
+      query(
+        `SELECT id, name, slug, photo, designation, final_score, rank, 'leader' AS type
+         FROM leaders WHERE is_active=1 AND name LIKE ? ORDER BY final_score DESC LIMIT 5`,
+        [term]
+      ),
+      query(
+        `SELECT id, title, slug, status, category, 'promise' AS type
+         FROM promises WHERE MATCH(title, description) AGAINST(? IN BOOLEAN MODE) LIMIT 5`,
+        [boolTerm]
+      ),
+      query(
+        `SELECT id, title, slug, status, category, 'project' AS type
+         FROM projects WHERE MATCH(title, description) AGAINST(? IN BOOLEAN MODE) LIMIT 5`,
+        [boolTerm]
+      ),
+    ])
 
-    return NextResponse.json({
-      success: true,
-      data: [...leaders, ...promises, ...projects, ...cases]
-    });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    return ok({ leaders, promises, projects, query: q })
+  } catch (e) {
+    return serverError(e)
   }
 }

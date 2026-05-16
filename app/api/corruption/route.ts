@@ -1,42 +1,38 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import pool from '@/lib/db';
+import { NextRequest } from 'next/server'
+import { paginate } from '@/lib/db'
+import { ok, serverError } from '@/lib/apiResponse'
 
-export async function GET(req: NextRequest) {
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
   try {
-    const sp     = new URL(req.url).searchParams;
-    const page   = Math.max(1, Number(sp.get('page')  || 1));
-    const limit  = Math.min(50, Number(sp.get('limit') || 20));
-    const offset = (page - 1) * limit;
-    const severity = sp.get('severity');
-    const leader   = sp.get('leader_id');
-    const search   = sp.get('q');
+    const sp      = request.nextUrl.searchParams
+    const page    = parseInt(sp.get('page')    ?? '1')
+    const perPage = parseInt(sp.get('per_page')?? '20')
+    const type    = sp.get('type')
+    const status  = sp.get('status')
 
-    let where = 'WHERE 1=1';
-    const params: any[] = [];
-    if (severity) { where += ' AND cc.severity = ?';    params.push(severity); }
-    if (leader)   { where += ' AND cc.leader_id = ?';   params.push(leader); }
-    if (search)   { where += ' AND cc.title LIKE ?';    params.push(`%${search}%`); }
+    let sql = `
+      SELECT
+        cc.id, cc.case_title, cc.type, cc.agency, cc.status,
+        cc.amount_involved, cc.started_at, cc.ai_severity_score, cc.is_verified,
+        l.name AS leader_name, l.slug AS leader_slug, l.photo AS leader_photo,
+        p.name AS party_name, p.abbreviation AS party_abbr, p.color_code,
+        s.name AS state_name
+      FROM corruption_cases cc
+      LEFT JOIN leaders l ON l.id = cc.leader_id
+      LEFT JOIN parties p ON p.id = l.party_id
+      LEFT JOIN states  s ON s.id = l.state_id
+      WHERE 1=1
+    `
+    const params: unknown[] = []
+    if (type)   { sql += ' AND cc.type = ?';   params.push(type) }
+    if (status) { sql += ' AND cc.status = ?'; params.push(status) }
+    sql += ' ORDER BY cc.ai_severity_score DESC, cc.started_at DESC'
 
-    const cases = await query(
-      `SELECT cc.*, l.name AS leader_name, l.slug AS leader_slug
-       FROM corruption_cases cc
-       LEFT JOIN leaders l ON l.id = cc.leader_id
-       ${where}
-       ORDER BY cc.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
-
-    const [[{ total }]] = await pool.execute(
-      `SELECT COUNT(*) AS total FROM corruption_cases cc ${where}`, params
-    ) as any;
-
-    return NextResponse.json({
-      success: true, data: cases,
-      pagination: { page, limit, total: Number(total), pages: Math.ceil(Number(total)/limit) }
-    });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    const result = await paginate(sql, params, page, perPage)
+    return ok(result.data, { pagination: { total: result.total, page, perPage, totalPages: result.totalPages } })
+  } catch (e) {
+    return serverError(e)
   }
 }
