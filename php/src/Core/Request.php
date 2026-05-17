@@ -1,68 +1,45 @@
 <?php
 namespace NetaTrack\Core;
 
-/**
- * NetaTrack India - HTTP Request Helper
- */
 class Request
 {
-    public static function method(): string
+    public function get(string $key, mixed $default = null): mixed
     {
-        return strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        return $_GET[$key] ?? $default;
     }
 
-    public static function uri(): string
+    public function post(string $key, mixed $default = null): mixed
     {
-        return parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        return $_POST[$key] ?? $default;
     }
 
-    public static function get(string $key, mixed $default = null): mixed
+    public function all(): array
     {
-        return htmlspecialchars(strip_tags($_GET[$key] ?? $default ?? ''));
+        return array_merge($_GET, $_POST);
     }
 
-    public static function post(string $key, mixed $default = null): mixed
+    public function method(): string
     {
-        $val = $_POST[$key] ?? $default;
-        if (is_string($val)) return htmlspecialchars(strip_tags($val));
-        return $val;
+        return $_SERVER['REQUEST_METHOD'] ?? 'GET';
     }
 
-    public static function input(string $key, mixed $default = null): mixed
+    public function isPost(): bool  { return $this->method() === 'POST'; }
+    public function isGet():  bool  { return $this->method() === 'GET';  }
+    public function isAjax(): bool  { return ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest'; }
+
+    public function ip(): string
     {
-        return self::post($key) ?? self::get($key, $default);
+        return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
     }
 
-    public static function all(): array
+    public function verifyCsrf(): bool
     {
-        return array_merge($_GET ?? [], $_POST ?? []);
+        $token = $this->post('_csrf_token') ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+        return hash_equals($_SESSION['_csrf_token'] ?? '', $token);
     }
 
-    public static function isPost(): bool { return self::method() === 'POST'; }
-    public static function isGet():  bool { return self::method() === 'GET'; }
-    public static function isAjax(): bool
+    public function file(string $key): ?array
     {
-        return ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
-    }
-
-    public static function ip(): string
-    {
-        return $_SERVER['HTTP_CF_CONNECTING_IP']
-            ?? $_SERVER['HTTP_X_FORWARDED_FOR']
-            ?? $_SERVER['REMOTE_ADDR']
-            ?? '0.0.0.0';
-    }
-
-    public static function bearerToken(): ?string
-    {
-        $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        if (str_starts_with($auth, 'Bearer ')) return substr($auth, 7);
-        return null;
-    }
-
-    public static function json(): ?array
-    {
-        $body = file_get_contents('php://input');
-        return json_decode($body, true);
+        return $_FILES[$key] ?? null;
     }
 }

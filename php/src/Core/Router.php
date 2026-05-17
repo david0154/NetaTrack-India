@@ -1,115 +1,143 @@
 <?php
 namespace NetaTrack\Core;
 
-/**
- * NetaTrack India - Router
- */
 class Router
 {
-    private static array $routes = [];
-    private static array $namedRoutes = [];
-    private static array $middleware = [];
-    private static string $prefix = '';
-    private static string $prefixName = '';
+    private static ?self $instance = null;
+    private array $routes = [];
+    private string $basePath = '';
 
-    public static function get(string $path, array|callable $handler, ?string $name = null): void
+    private function __construct() {}
+
+    public static function getInstance(): self
     {
-        self::add('GET', $path, $handler, $name);
+        if (self::$instance === null) self::$instance = new self();
+        return self::$instance;
     }
 
-    public static function post(string $path, array|callable $handler, ?string $name = null): void
+    public function setBasePath(string $path): void { $this->basePath = rtrim($path, '/'); }
+
+    public function get(string $path, string|callable $handler): void
     {
-        self::add('POST', $path, $handler, $name);
+        $this->addRoute('GET', $path, $handler);
     }
 
-    public static function group(array $attrs, callable $cb): void
+    public function post(string $path, string|callable $handler): void
     {
-        $prevPrefix     = self::$prefix;
-        $prevPrefixName = self::$prefixName;
-        $prevMiddleware = self::$middleware;
-
-        if (isset($attrs['prefix'])) self::$prefix .= '/' . trim($attrs['prefix'], '/');
-        if (isset($attrs['name']))   self::$prefixName .= $attrs['name'];
-        if (isset($attrs['middleware'])) {
-            self::$middleware = array_merge(self::$middleware, (array)$attrs['middleware']);
-        }
-
-        $cb();
-
-        self::$prefix     = $prevPrefix;
-        self::$prefixName = $prevPrefixName;
-        self::$middleware = $prevMiddleware;
+        $this->addRoute('POST', $path, $handler);
     }
 
-    private static function add(string $method, string $path, array|callable $handler, ?string $name): void
+    public function group(string $prefix, array $options, callable $callback): void
     {
-        $path = self::$prefix . '/' . trim($path, '/');
-        $path = rtrim($path, '/')  ?: '/';
-        $route = [
-            'method'     => $method,
-            'path'       => $path,
-            'handler'    => $handler,
-            'middleware' => self::$middleware,
-            'pattern'    => self::toRegex($path),
-        ];
-        self::$routes[] = $route;
-        if ($name) {
-            self::$namedRoutes[self::$prefixName . $name] = $path;
+        $sub = new self();
+        $callback($sub);
+        foreach ($sub->routes as $route) {
+            $route['path']       = $prefix . ($route['path'] ? '/' . $route['path'] : '');
+            $route['middleware'] = array_merge($options['middleware'] ?? [], $route['middleware'] ?? []);
+            $this->routes[] = $route;
         }
     }
 
-    private static function toRegex(string $path): string
+    public function fallback(callable $handler): void
     {
-        $pattern = preg_replace('/\{([a-zA-Z_]+)\}/', '(?P<$1>[^/]+)', $path);
-        return '#^' . $pattern . '$#';
+        $this->routes[] = ['method'=>'FALLBACK','path'=>'*','handler'=>$handler,'middleware'=>[]];
     }
 
-    public static function dispatch(): void
+    private function addRoute(string $method, string $path, string|callable $handler): void
+    {
+        $this->routes[] = ['method'=>$method, 'path'=>$path, 'handler'=>$handler, 'middleware'=>[]];
+    }
+
+    public function dispatch(): void
     {
         $method = $_SERVER['REQUEST_METHOD'];
         $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
-        $uri    = '/' . trim($uri, '/');
-        if ($uri !== '/') $uri = rtrim($uri, '/');
+        $uri    = trim($uri, '/');
 
-        foreach (self::$routes as $route) {
-            if ($route['method'] !== $method) continue;
-            if (!preg_match($route['pattern'], $uri, $matches)) continue;
+        // Strip base path
+        if ($this->basePath) {
+            $base = ltrim($this->basePath, '/');
+            if (str_starts_with($uri, $base)) {
+                $uri = ltrim(substr($uri, strlen($base)), '/');
+            }
+        }
 
-            // Run middleware
+        $fallback = null;
+
+        foreach ($this->routes as $route) {
+            if ($route['method'] === 'FALLBACK') { $fallback = $route; continue; }
+            if ($route['method'] !== $method)    continue;
+
+            [$matched, $params] = $this->matchPath($route['path'], $uri);
+            if (!$matched) continue;
+
+            // Middleware
             foreach ($route['middleware'] as $mw) {
-                $mwClass = 'NetaTrack\\Middleware\\' . $mw;
-                if (class_exists($mwClass)) {
-                    (new $mwClass())->handle();
-                }
+                $this->runMiddleware($mw);
             }
 
-            // Extract named params
-            $params = array_filter($matches, 'is_string', ARRAY_FILTER_USE_KEY);
-
-            // Dispatch handler
-            if (is_callable($route['handler'])) {
-                call_user_func_array($route['handler'], $params);
-            } elseif (is_array($route['handler'])) {
-                [$class, $method] = $route['handler'];
-                $controller = new $class();
-                call_user_func_array([$controller, $method], $params);
-            }
+            $req = new Request();
+            $res = new Response();
+            $this->callHandler($route['handler'], $req, $res, $params);
             return;
         }
 
-        // 404
-        http_response_code(404);
-        $view = VIEWS_PATH . '/errors/404.php';
-        if (file_exists($view)) require $view;
-        else echo '<h1>404 - Page Not Found</h1>';
+        if ($fallback) {
+            ($fallback['handler'])();
+        } else {
+            http_response_code(404);
+            echo '404 Not Found';
+        }
     }
 
-    public static function route(string $name, array $params = []): string
+    private function matchPath(string $pattern, string $uri): array
     {
-        $path = self::$namedRoutes[$name] ?? '/';
-        foreach ($params as $k => $v) {
-            $path = str_replace("{{$k}}", $v, $path);
+        if ($pattern === $uri) return [true, []];
+
+        $patternParts = explode('/', $pattern);
+        $uriParts     = explode('/', $uri);
+
+        if (count($patternParts) !== count($uriParts)) return [false, []];
+
+        $params = [];
+        foreach ($patternParts as $i => $part) {
+            if (str_starts_with($part, '{') && str_ends_with($part, '}')) {
+                $params[trim($part, '{}')] = $uriParts[$i];
+            } elseif ($part !== $uriParts[$i]) {
+                return [false, []];
+            }
         }
-        return $path;
+        return [true, $params];
+    }
+
+    private function runMiddleware(string $name): void
+    {
+        switch ($name) {
+            case 'auth':
+                if (!auth()->check()) {
+                    (new Response())->redirect('auth/login');
+                    exit;
+                }
+                break;
+            case 'admin':
+                if (!auth()->isAdmin()) {
+                    (new Response())->redirect('admin/auth/login');
+                    exit;
+                }
+                break;
+        }
+    }
+
+    private function callHandler(string|callable $handler, Request $req, Response $res, array $params): void
+    {
+        if (is_callable($handler)) {
+            $handler($req, $res, ...$params);
+            return;
+        }
+        [$class, $method] = explode('@', $handler);
+        $namespace = 'NetaTrack\\Controllers\\';
+        $fqcn      = $namespace.$class;
+        $ctrl      = new $fqcn();
+        $ctrl->$method($req, $res, ...$params);
     }
 }
