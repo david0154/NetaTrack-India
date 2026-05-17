@@ -1,45 +1,121 @@
 <?php
 namespace NetaTrack\Models;
 
-class Leader extends BaseModel
+use NetaTrack\Core\Model;
+
+/**
+ * NetaTrack India - Political Leader Model
+ */
+class Leader extends Model
 {
     protected string $table = 'leaders';
+    protected array $fillable = [
+        'name','slug','photo','dob','gender','state_id','party_id',
+        'constituency','position','designation','term_start','term_end',
+        'education','assets_declared','criminal_cases',
+        // Score fields
+        'score_promise_completion','score_project_delivery',
+        'score_budget_efficiency','score_public_satisfaction',
+        'score_transparency','score_corruption','score_fake_claims',
+        'score_verification_trust','total_score','score_rank',
+        // Contact
+        'email','phone','website','twitter','facebook','instagram',
+        // Meta
+        'bio','status','is_verified','created_at','updated_at'
+    ];
 
-    public function withPartyAndState(int $id): array|false
+    public function findBySlug(string $slug): ?array
     {
-        return $this->db->selectOne(
-            'SELECT l.*, p.name as party_name, p.abbreviation as party_abbr, p.logo as party_logo, p.color as party_color, s.name as state_name, s.code as state_code FROM leaders l LEFT JOIN parties p ON l.party_id = p.id LEFT JOIN states s ON l.state_id = s.id WHERE l.id = ?',
-            [$id]
+        return $this->db->fetch(
+            'SELECT l.*,
+                    s.name as state_name, s.slug as state_slug,
+                    p.name as party_name, p.abbreviation as party_abbr, p.color_code as party_color
+             FROM leaders l
+             LEFT JOIN states s ON s.id=l.state_id
+             LEFT JOIN parties p ON p.id=l.party_id
+             WHERE l.slug=? LIMIT 1',
+            [$slug]
         );
     }
 
-    public function getTopLeaders(int $limit = 10, ?string $stateCode = null): array
+    public function getTopLeaders(int $limit = 10): array
     {
-        $where = 'l.is_active = 1';
-        $params = [];
-        if ($stateCode) {
-            $where .= ' AND s.code = ?';
-            $params[] = $stateCode;
-        }
-        return $this->db->select(
-            "SELECT l.*, p.name as party_name, p.color as party_color, s.name as state_name FROM leaders l LEFT JOIN parties p ON l.party_id = p.id LEFT JOIN states s ON l.state_id = s.id WHERE $where ORDER BY l.final_score DESC LIMIT ?",
-            array_merge($params, [$limit])
-        );
-    }
-
-    public function getTrendingCorrupt(int $limit = 5): array
-    {
-        return $this->db->select(
-            'SELECT l.*, p.name as party_name, s.name as state_name FROM leaders l LEFT JOIN parties p ON l.party_id = p.id LEFT JOIN states s ON l.state_id = s.id WHERE l.is_active = 1 ORDER BY l.corruption_score DESC LIMIT ?',
+        return $this->db->fetchAll(
+            'SELECT l.*, s.name as state_name, p.name as party_name, p.color_code as party_color
+             FROM leaders l
+             LEFT JOIN states s ON s.id=l.state_id
+             LEFT JOIN parties p ON p.id=l.party_id
+             WHERE l.status="active"
+             ORDER BY l.total_score DESC LIMIT ?',
             [$limit]
         );
     }
 
-    public function searchLeaders(string $q, int $limit = 20): array
+    public function getByState(int $stateId): array
     {
-        return $this->db->select(
-            "SELECT l.id, l.uuid, l.name, l.photo, l.designation, l.final_score, l.rank_label, p.name as party_name, s.name as state_name FROM leaders l LEFT JOIN parties p ON l.party_id = p.id LEFT JOIN states s ON l.state_id = s.id WHERE l.name LIKE ? OR l.constituency LIKE ? ORDER BY l.final_score DESC LIMIT ?",
-            ["%$q%", "%$q%", $limit]
+        return $this->db->fetchAll(
+            'SELECT l.*, p.name as party_name, p.color_code as party_color
+             FROM leaders l
+             LEFT JOIN parties p ON p.id=l.party_id
+             WHERE l.state_id=? AND l.status="active"
+             ORDER BY l.total_score DESC',
+            [$stateId]
         );
+    }
+
+    public function search(string $q, int $limit = 20): array
+    {
+        return $this->db->fetchAll(
+            'SELECT l.*, s.name as state_name, p.name as party_name
+             FROM leaders l
+             LEFT JOIN states s ON s.id=l.state_id
+             LEFT JOIN parties p ON p.id=l.party_id
+             WHERE l.status="active" AND (
+                 l.name LIKE ? OR l.constituency LIKE ? OR l.designation LIKE ?
+             ) LIMIT ?',
+            ["%{$q}%", "%{$q}%", "%{$q}%", $limit]
+        );
+    }
+
+    public function recalculateScore(int $leaderId): void
+    {
+        $l = $this->find($leaderId);
+        if (!$l) return;
+
+        $score =
+            ($l['score_promise_completion']  * 0.30) +
+            ($l['score_project_delivery']    * 0.20) +
+            ($l['score_budget_efficiency']   * 0.15) +
+            ($l['score_public_satisfaction'] * 0.10) +
+            ($l['score_transparency']        * 0.10) +
+            ($l['score_verification_trust']  * 0.15) -
+            ($l['score_corruption']          * 0.20) -
+            ($l['score_fake_claims']         * 0.10);
+
+        $score = max(0, min(100, round($score)));
+
+        $rank = match(true) {
+            $score >= 90 => 'Excellent',
+            $score >= 75 => 'Good',
+            $score >= 50 => 'Average',
+            default      => 'Poor',
+        };
+
+        $this->db->query(
+            'UPDATE leaders SET total_score=?, score_rank=? WHERE id=?',
+            [$score, $rank, $leaderId]
+        );
+    }
+
+    public function getStats(): array
+    {
+        return [
+            'total'     => $this->count(),
+            'active'    => $this->count("status='active'"),
+            'excellent' => $this->count("score_rank='Excellent'"),
+            'good'      => $this->count("score_rank='Good'"),
+            'average'   => $this->count("score_rank='Average'"),
+            'poor'      => $this->count("score_rank='Poor'"),
+        ];
     }
 }

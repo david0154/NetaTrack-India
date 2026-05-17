@@ -1,0 +1,53 @@
+-- NetaTrack India: Phase 1 Migration 003
+-- Leaders Table
+
+CREATE TABLE IF NOT EXISTS `leaders` (
+    `id`                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name`                     VARCHAR(200)   NOT NULL,
+    `slug`                     VARCHAR(220)   NOT NULL UNIQUE,
+    `photo`                    VARCHAR(500)   DEFAULT NULL,
+    `dob`                      DATE           DEFAULT NULL,
+    `gender`                   ENUM('Male','Female','Other') DEFAULT 'Male',
+    `state_id`                 INT UNSIGNED   DEFAULT NULL,
+    `party_id`                 INT UNSIGNED   DEFAULT NULL,
+    `constituency`             VARCHAR(200)   DEFAULT NULL,
+    `position`                 VARCHAR(200)   DEFAULT NULL,
+    `designation`              VARCHAR(200)   DEFAULT NULL,
+    `term_start`               DATE           DEFAULT NULL,
+    `term_end`                 DATE           DEFAULT NULL,
+    `education`                TEXT           DEFAULT NULL,
+    `assets_declared`          DECIMAL(15,2)  DEFAULT 0,
+    `criminal_cases`           TINYINT        DEFAULT 0,
+    -- Score Fields
+    `score_promise_completion` TINYINT UNSIGNED DEFAULT 50,
+    `score_project_delivery`   TINYINT UNSIGNED DEFAULT 50,
+    `score_budget_efficiency`  TINYINT UNSIGNED DEFAULT 50,
+    `score_public_satisfaction`TINYINT UNSIGNED DEFAULT 50,
+    `score_transparency`       TINYINT UNSIGNED DEFAULT 50,
+    `score_corruption`         TINYINT UNSIGNED DEFAULT 0,
+    `score_fake_claims`        TINYINT UNSIGNED DEFAULT 0,
+    `score_verification_trust` TINYINT UNSIGNED DEFAULT 50,
+    `total_score`              TINYINT UNSIGNED DEFAULT 50,
+    `score_rank`               ENUM('Excellent','Good','Average','Poor') DEFAULT 'Average',
+    -- Contact
+    `email`                    VARCHAR(200)   DEFAULT NULL,
+    `phone`                    VARCHAR(20)    DEFAULT NULL,
+    `website`                  VARCHAR(300)   DEFAULT NULL,
+    `twitter`                  VARCHAR(200)   DEFAULT NULL,
+    `facebook`                 VARCHAR(200)   DEFAULT NULL,
+    `instagram`                VARCHAR(200)   DEFAULT NULL,
+    -- Meta
+    `bio`                      TEXT           DEFAULT NULL,
+    `status`                   ENUM('active','inactive','archived') DEFAULT 'active',
+    `is_verified`              TINYINT(1)     DEFAULT 0,
+    `created_at`               DATETIME       DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`               DATETIME       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`state_id`) REFERENCES `states`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`party_id`) REFERENCES `parties`(`id`) ON DELETE SET NULL,
+    INDEX `idx_slug`        (`slug`),
+    INDEX `idx_state`       (`state_id`),
+    INDEX `idx_party`       (`party_id`),
+    INDEX `idx_total_score` (`total_score`),
+    INDEX `idx_status`      (`status`),
+    FULLTEXT INDEX `ft_search` (`name`,`constituency`,`designation`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

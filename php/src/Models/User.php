@@ -1,36 +1,63 @@
 <?php
 namespace NetaTrack\Models;
 
-class User extends BaseModel
+use NetaTrack\Core\Model;
+
+/**
+ * NetaTrack India - User Model
+ */
+class User extends Model
 {
     protected string $table = 'users';
+    protected array $fillable = [
+        'name','email','password','role','status',
+        'phone','avatar','bio','credibility_score',
+        'email_verified_at','last_login_at','ip_address',
+        'created_at','updated_at'
+    ];
+    protected array $hidden = ['password'];
 
-    public function findByEmail(string $email): array|false
+    public function createUser(array $data): int
     {
-        return $this->db->selectOne(
-            'SELECT u.*, r.name as role_name, r.permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.email = ? LIMIT 1',
-            [$email]
+        $data['password']           = password_hash($data['password'], PASSWORD_BCRYPT, ['cost'=>12]);
+        $data['role']               = $data['role'] ?? 'public';
+        $data['status']             = 'active';
+        $data['credibility_score']  = 0;
+        return $this->create($data);
+    }
+
+    public function findByEmail(string $email): ?array
+    {
+        return $this->findBy('email', $email);
+    }
+
+    public function updateCredibility(int $userId, int $delta): void
+    {
+        $this->db->query(
+            'UPDATE users SET credibility_score = GREATEST(0, credibility_score + ?) WHERE id=?',
+            [$delta, $userId]
         );
     }
 
-    public function withRole(int $id): array|false
+    public function getAdmins(): array
     {
-        return $this->db->selectOne(
-            'SELECT u.*, r.name as role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
-            [$id]
+        return $this->db->fetchAll(
+            "SELECT * FROM users WHERE role IN ('super_admin','admin','moderator','editor') AND status='active' ORDER BY role"
         );
     }
 
-    public function getLeaderboard(int $limit = 10): array
+    public function ban(int $userId): void
     {
-        return $this->db->select(
-            'SELECT id, name, credibility_score, approved_reports, state FROM users WHERE role_id = 4 ORDER BY credibility_score DESC LIMIT ?',
-            [$limit]
-        );
+        $this->db->query('UPDATE users SET status=? WHERE id=?', ['banned', $userId]);
     }
 
-    public function incrementCredibility(int $userId, int $points = 1): void
+    public function getStats(): array
     {
-        $this->db->query('UPDATE users SET credibility_score = credibility_score + ?, approved_reports = approved_reports + 1 WHERE id = ?', [$points, $userId]);
+        return [
+            'total'   => $this->count(),
+            'active'  => $this->count("status='active'"),
+            'banned'  => $this->count("status='banned'"),
+            'admins'  => $this->count("role IN ('super_admin','admin','moderator','editor')"),
+        ];
     }
 }

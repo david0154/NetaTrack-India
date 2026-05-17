@@ -2,27 +2,37 @@
 namespace NetaTrack\Models;
 
 use NetaTrack\Core\Model;
-use NetaTrack\Core\Database;
 
-class State extends Model {
-    protected static string $table = 'states';
+/**
+ * NetaTrack India - State Model
+ */
+class State extends Model
+{
+    protected string $table = 'states';
+    protected array $fillable = [
+        'name','slug','code','region','capital',
+        'cm_name','cm_party','total_mlas','total_mps',
+        'latitude','longitude','map_color',
+        'is_ut','status','created_at','updated_at'
+    ];
 
-    public static function findBySlug(string $slug): ?array {
-        return Database::fetch("SELECT * FROM states WHERE slug = ? LIMIT 1", [$slug]);
+    public function allActive(): array
+    {
+        return $this->db->fetchAll("SELECT * FROM states WHERE status='active' ORDER BY name ASC");
     }
 
-    public static function getAllWithStats(): array {
-        return Database::fetchAll(
-            "SELECT s.*,
-                COUNT(DISTINCT l.id) as leader_count,
-                COUNT(DISTINCT pj.id) as project_count,
-                COUNT(DISTINCT pr.id) as promise_count
+    public function findBySlug(string $slug): ?array
+    {
+        return $this->findBy('slug', $slug);
+    }
+
+    public function getWithLeaderCount(): array
+    {
+        return $this->db->fetchAll(
+            'SELECT s.*, COUNT(l.id) as leader_count
              FROM states s
-             LEFT JOIN leaders l  ON l.state_id  = s.id
-             LEFT JOIN projects pj ON pj.state_id = s.id
-             LEFT JOIN promises pr ON pr.leader_id IN (SELECT id FROM leaders WHERE state_id = s.id)
-             GROUP BY s.id
-             ORDER BY s.name ASC"
+             LEFT JOIN leaders l ON l.state_id=s.id AND l.status="active"
+             GROUP BY s.id ORDER BY s.name'
         );
     }
 }

@@ -1,42 +1,55 @@
 <?php
 namespace NetaTrack\Models;
 
-class Promise extends BaseModel
+use NetaTrack\Core\Model;
+
+/**
+ * NetaTrack India - Political Promise Model
+ */
+class Promise extends Model
 {
     protected string $table = 'promises';
+    protected array $fillable = [
+        'leader_id','title','description','category',
+        'source_url','source_type','promised_date',
+        'deadline','status','completion_percent',
+        'ai_verified','ai_confidence','admin_verified',
+        'fake_claim','fake_reason','evidence_url',
+        'state_id','party_id','created_at','updated_at'
+    ];
 
-    public function withLeader(int $id): array|false
+    // status: pending | kept | broken | partial | in_progress | fake
+
+    public function getByLeader(int $leaderId, int $page = 1, int $perPage = 20): array
     {
-        return $this->db->selectOne(
-            'SELECT pr.*, l.name as leader_name, l.photo as leader_photo, l.designation, p.name as party_name, p.color as party_color, s.name as state_name FROM promises pr LEFT JOIN leaders l ON pr.leader_id = l.id LEFT JOIN parties p ON l.party_id = p.id LEFT JOIN states s ON pr.state_id = s.id WHERE pr.id = ?',
-            [$id]
-        );
+        return $this->paginate($page, $perPage, 'leader_id=?', [$leaderId]);
     }
 
-    public function getByLeader(int $leaderId, string $status = ''): array
+    public function getStats(int $leaderId): array
     {
-        $where = 'leader_id = ?';
-        $params = [$leaderId];
-        if ($status) {
-            $where .= ' AND status = ?';
-            $params[] = $status;
-        }
-        return $this->db->select("SELECT * FROM promises WHERE $where ORDER BY promised_date DESC", $params);
-    }
-
-    public function getStatsByLeader(int $leaderId): array
-    {
-        return $this->db->selectOne(
-            "SELECT COUNT(*) as total, SUM(status='completed') as completed, SUM(status='broken') as broken, SUM(status='in_progress') as in_progress, SUM(fake_claim_flag=1) as fake_claims FROM promises WHERE leader_id = ?",
+        $rows = $this->db->fetchAll(
+            'SELECT status, COUNT(*) as cnt FROM promises WHERE leader_id=? GROUP BY status',
             [$leaderId]
         );
+        $stats = ['total'=>0,'kept'=>0,'broken'=>0,'partial'=>0,'in_progress'=>0,'fake'=>0,'pending'=>0];
+        foreach ($rows as $r) {
+            $stats[$r['status']] = (int)$r['cnt'];
+            $stats['total'] += (int)$r['cnt'];
+        }
+        if ($stats['total'] > 0) {
+            $stats['completion_rate'] = round(($stats['kept'] / $stats['total']) * 100);
+        } else {
+            $stats['completion_rate'] = 0;
+        }
+        return $stats;
     }
 
-    public function getFakeClaims(int $limit = 10): array
+    public function getPlatformStats(): array
     {
-        return $this->db->select(
-            'SELECT pr.*, l.name as leader_name, l.photo as leader_photo FROM promises pr LEFT JOIN leaders l ON pr.leader_id = l.id WHERE pr.fake_claim_flag = 1 ORDER BY pr.updated_at DESC LIMIT ?',
-            [$limit]
-        );
+        $total = $this->count();
+        $kept  = $this->count("status='kept'");
+        $fake  = $this->count("status='fake' OR fake_claim=1");
+        return ['total'=>$total,'kept'=>$kept,'fake'=>$fake,
+                'completion_rate'=> $total > 0 ? round(($kept/$total)*100) : 0];
     }
 }
