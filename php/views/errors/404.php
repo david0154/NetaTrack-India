@@ -1,26 +1,29 @@
+<?php
+$isAdmin = str_contains($_SERVER['REQUEST_URI'] ?? '', '/admin/');
+$layout = $isAdmin ? 'admin' : 'public';
+$page_title = '404 Not Found';
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>404 - Page Not Found | NetaTrack India</title>
+<title>404 — Page Not Found | NetaTrack India</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}
-.container{padding:2rem}
-.code{font-size:8rem;font-weight:900;background:linear-gradient(135deg,#3b82f6,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1}
-.title{font-size:1.8rem;margin:1rem 0;color:#94a3b8}
-.desc{color:#64748b;margin-bottom:2rem}
-.btn{display:inline-block;padding:.75rem 2rem;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;border-radius:.5rem;text-decoration:none;font-weight:600;transition:.3s}
-.btn:hover{opacity:.9;transform:translateY(-2px)}
+  body{margin:0;background:#0f172a;color:#e2e8f0;font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}
+  .box{text-align:center;padding:2rem;}
+  .code{font-size:8rem;font-weight:800;color:#3b82f6;line-height:1;}
+  h2{font-size:1.5rem;margin:.5rem 0;color:#94a3b8;}
+  p{color:#64748b;}
+  a{display:inline-block;margin-top:1.5rem;padding:.75rem 2rem;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;}
+  a:hover{background:#2563eb;}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="box">
   <div class="code">404</div>
-  <div class="title">Page Not Found</div>
-  <div class="desc">The page you're looking for doesn't exist or has been moved.</div>
-  <a href="/" class="btn">← Back to Home</a>
+  <h2>Page Not Found</h2>
+  <p>The page you are looking for doesn&apos;t exist or has been moved.</p>
+  <a href="<?= url('') ?>">&#8592; Go Home</a>
 </div>
 </body>
 </html>
