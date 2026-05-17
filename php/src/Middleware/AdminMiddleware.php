@@ -4,19 +4,20 @@ namespace NetaTrack\Middleware;
 use NetaTrack\Core\Auth;
 use NetaTrack\Core\Response;
 
+/**
+ * NetaTrack India - Admin Middleware
+ */
 class AdminMiddleware
 {
-    public function handle($request, callable $next): mixed
+    public function handle(): void
     {
         $auth = Auth::getInstance();
         if (!$auth->check()) {
-            Response::redirect('/admin/login');
-            return false;
+            flash('error', 'Please log in to access the admin panel.');
+            Response::redirect(url('admin/login'));
         }
         if (!$auth->isAdmin()) {
-            Response::abort(403, 'Access denied. Admin privileges required.');
-            return false;
+            Response::forbidden();
         }
-        return $next($request);
     }
 }

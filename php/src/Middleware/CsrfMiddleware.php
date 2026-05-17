@@ -1,42 +1,31 @@
 <?php
 namespace NetaTrack\Middleware;
 
-use NetaTrack\Core\Auth;
-use NetaTrack\Core\Request;
 use NetaTrack\Core\Response;
 
+/**
+ * NetaTrack India - CSRF Middleware
+ */
 class CsrfMiddleware
 {
-    private array $except = ['/api/', '/webhook/'];
+    private array $except = [
+        '/api/webhook',
+        '/api/scraper/callback',
+    ];
 
-    public function handle($request, callable $next): mixed
+    public function handle(): void
     {
-        $method = $_SERVER['REQUEST_METHOD'];
-        $uri = $_SERVER['REQUEST_URI'];
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
 
-        // Skip for GET, HEAD, OPTIONS
-        if (in_array($method, ['GET', 'HEAD', 'OPTIONS'])) {
-            return $next($request);
+        $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        foreach ($this->except as $ex) {
+            if (str_starts_with($uri, $ex)) return;
         }
 
-        // Skip for API routes
-        foreach ($this->except as $except) {
-            if (str_starts_with($uri, $except)) {
-                return $next($request);
-            }
+        $token = $_POST['_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        if (!hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+            http_response_code(419);
+            die('CSRF token mismatch.');
         }
-
-        $token = $_POST['_csrf'] ?? Request::getInstance()->header('X-CSRF-Token') ?? '';
-
-        if (!Auth::getInstance()->verifyCsrf($token)) {
-            if (Request::getInstance()->isAjax()) {
-                Response::error('CSRF token mismatch', 419);
-            } else {
-                Response::abort(419, 'CSRF token mismatch. Please refresh the page.');
-            }
-            return false;
-        }
-
-        return $next($request);
     }
 }

@@ -1,74 +1,52 @@
 <?php
 namespace NetaTrack\Core;
 
+/**
+ * NetaTrack India - HTTP Response Helper
+ */
 class Response
 {
-    public static function json(mixed $data, int $code = 200): void
+    public static function json(mixed $data, int $status = 200, array $headers = []): void
     {
-        http_response_code($code);
+        http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
-        header('X-Content-Type-Options: nosniff');
-        echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        foreach ($headers as $k => $v) header("{$k}: {$v}");
+        echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         exit;
     }
 
-    public static function success(mixed $data = null, string $message = 'Success', int $code = 200): void
+    public static function success(mixed $data = null, string $message = 'Success', int $status = 200): void
     {
-        static::json([
-            'success' => true,
-            'message' => $message,
-            'data'    => $data,
-        ], $code);
+        self::json(['success' => true, 'message' => $message, 'data' => $data], $status);
     }
 
-    public static function error(string $message, int $code = 400, array $errors = []): void
+    public static function error(string $message = 'Error', int $status = 400, array $errors = []): void
     {
-        static::json([
-            'success' => false,
-            'message' => $message,
-            'errors'  => $errors,
-        ], $code);
+        self::json(['success' => false, 'message' => $message, 'errors' => $errors], $status);
     }
 
-    public static function redirect(string $url, int $code = 302): void
+    public static function redirect(string $url, int $status = 302): void
     {
-        http_response_code($code);
-        header('Location: ' . $url);
+        http_response_code($status);
+        header("Location: {$url}");
         exit;
     }
 
-    public static function view(string $view, array $data = [], int $code = 200): void
+    public static function notFound(): void
     {
-        http_response_code($code);
-        extract($data);
-        $viewPath = ROOT_PATH . '/views/' . str_replace('.', '/', $view) . '.php';
-        if (!file_exists($viewPath)) {
-            static::abort(404, "View not found: $view");
-        }
-        require $viewPath;
+        http_response_code(404);
+        $view = VIEWS_PATH . '/errors/404.php';
+        if (file_exists($view)) require $view;
+        else echo '<h1>404 Not Found</h1>';
         exit;
     }
 
-    public static function abort(int $code, string $message = ''): void
+    public static function forbidden(): void
     {
-        http_response_code($code);
-        $isApi = str_starts_with($_SERVER['REQUEST_URI'] ?? '', '/api/');
-        if ($isApi) {
-            static::json(['success' => false, 'message' => $message ?: "HTTP $code"], $code);
-        } else {
-            $viewPath = ROOT_PATH . '/views/errors/' . $code . '.php';
-            if (file_exists($viewPath)) {
-                require $viewPath;
-            } else {
-                echo "<h1>Error $code</h1><p>$message</p>";
-            }
-        }
+        http_response_code(403);
+        $view = VIEWS_PATH . '/errors/403.php';
+        if (file_exists($view)) require $view;
+        else echo '<h1>403 Forbidden</h1>';
         exit;
-    }
-
-    public static function withFlash(string $url, string $type, string $message): void
-    {
-        $_SESSION['flash'] = ['type' => $type, 'message' => $message];
-        static::redirect($url);
     }
 }

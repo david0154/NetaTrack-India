@@ -1,153 +1,99 @@
 <?php
 namespace NetaTrack\Core;
 
-use NetaTrack\Models\User;
-
+/**
+ * NetaTrack India - Auth Manager
+ */
 class Auth
 {
     private static ?Auth $instance = null;
     private ?array $user = null;
 
-    public static function getInstance(): static
+    private function __construct() {}
+
+    public static function getInstance(): self
     {
-        if (static::$instance === null) {
-            static::$instance = new static();
-        }
-        return static::$instance;
+        if (self::$instance === null) self::$instance = new self();
+        return self::$instance;
     }
 
     public function init(): void
     {
+        $cfg = require ROOT_PATH . '/config/auth.php';
         if (session_status() === PHP_SESSION_NONE) {
-            session_name('netatrack_session');
+            session_name($cfg['session_name']);
             session_set_cookie_params([
-                'lifetime' => 0,
+                'lifetime' => $cfg['session_lifetime'],
                 'path'     => '/',
-                'secure'   => isset($_SERVER['HTTPS']),
+                'secure'   => !APP_DEBUG,
                 'httponly' => true,
-                'samesite' => 'Strict',
+                'samesite' => 'Lax',
             ]);
             session_start();
         }
 
+        // Restore user from session
         if (!empty($_SESSION['user_id'])) {
-            $this->user = (new User())->find($_SESSION['user_id']);
+            $db = Database::getInstance();
+            $this->user = $db->fetch(
+                'SELECT * FROM users WHERE id=? AND status=? LIMIT 1',
+                [$_SESSION['user_id'], 'active']
+            );
         }
     }
 
-    public function attempt(string $email, string $password, bool $remember = false): bool
+    public function attempt(string $email, string $password): bool
     {
-        $userModel = new User();
-        $user = $userModel->findByEmail($email);
+        $db   = Database::getInstance();
+        $user = $db->fetch('SELECT * FROM users WHERE email=? AND status=? LIMIT 1', [$email, 'active']);
+        if (!$user || !password_verify($password, $user['password'])) return false;
 
-        if (!$user || !password_verify($password, $user['password'])) {
-            return false;
-        }
-
-        if ($user['is_banned']) {
-            throw new \RuntimeException('Your account has been banned: ' . ($user['ban_reason'] ?? 'No reason given'));
-        }
-
-        $this->loginUser($user);
-
-        if ($remember) {
-            $token = bin2hex(random_bytes(32));
-            setcookie('remember_token', $token, time() + 30 * 86400, '/', '', isset($_SERVER['HTTPS']), true);
-            $userModel->update($user['id'], ['remember_token' => hash('sha256', $token)]);
-        }
-
+        $this->login($user);
         return true;
     }
 
-    private function loginUser(array $user): void
+    public function login(array $user): void
     {
         session_regenerate_id(true);
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['_token'] = bin2hex(random_bytes(32));
+        $_SESSION['user_id']   = $user['id'];
+        $_SESSION['user_role'] = $user['role'];
         $this->user = $user;
 
-        (new User())->update($user['id'], ['last_login' => date('Y-m-d H:i:s')]);
+        // Update last login
+        Database::getInstance()->query(
+            'UPDATE users SET last_login_at=? WHERE id=?',
+            [date('Y-m-d H:i:s'), $user['id']]
+        );
     }
 
     public function logout(): void
     {
-        $this->user = null;
         $_SESSION = [];
         session_destroy();
-        setcookie('remember_token', '', time() - 3600, '/');
+        $this->user = null;
     }
 
-    public function check(): bool
-    {
-        return $this->user !== null;
-    }
-
-    public function user(): ?array
-    {
-        return $this->user;
-    }
-
-    public function id(): ?int
-    {
-        return $this->user ? (int)$this->user['id'] : null;
-    }
+    public function check(): bool   { return $this->user !== null; }
+    public function user(): ?array  { return $this->user; }
+    public function id(): ?int      { return $this->user ? (int)$this->user['id'] : null; }
+    public function role(): ?string { return $this->user['role'] ?? null; }
 
     public function isAdmin(): bool
     {
-        return $this->user && in_array($this->user['role_id'], [1, 2]);
+        return in_array($this->role(), ['super_admin','admin','moderator','editor']);
     }
 
     public function isSuperAdmin(): bool
     {
-        return $this->user && (int)$this->user['role_id'] === 1;
+        return $this->role() === 'super_admin';
     }
 
-    public function isModerator(): bool
+    public function hasRole(string $role): bool
     {
-        return $this->user && in_array($this->user['role_id'], [1, 2, 3]);
-    }
-
-    public function csrfToken(): string
-    {
-        if (empty($_SESSION['_csrf'])) {
-            $_SESSION['_csrf'] = bin2hex(random_bytes(32));
-        }
-        return $_SESSION['_csrf'];
-    }
-
-    public function verifyCsrf(string $token): bool
-    {
-        return hash_equals($_SESSION['_csrf'] ?? '', $token);
-    }
-
-    public function register(array $data): int
-    {
-        $db = Database::getInstance();
-
-        $exists = $db->selectOne('SELECT id FROM users WHERE email = ?', [$data['email']]);
-        if ($exists) {
-            throw new \RuntimeException('Email already registered');
-        }
-
-        return $db->insert('users', [
-            'uuid'       => $this->generateUuid(),
-            'name'       => $data['name'],
-            'email'      => $data['email'],
-            'password'   => password_hash($data['password'], PASSWORD_ARGON2ID),
-            'role_id'    => 4,
-            'state'      => $data['state'] ?? null,
-            'created_at' => date('Y-m-d H:i:s'),
-        ]);
-    }
-
-    private function generateUuid(): string
-    {
-        return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-            mt_rand(0, 0xffff),
-            mt_rand(0, 0x0fff) | 0x4000,
-            mt_rand(0, 0x3fff) | 0x8000,
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
-        );
+        $cfg    = require ROOT_PATH . '/config/auth.php';
+        $roles  = $cfg['roles'];
+        $myPerm = $roles[$this->role()] ?? 0;
+        $reqPerm= $roles[$role] ?? 999;
+        return $myPerm >= $reqPerm;
     }
 }
