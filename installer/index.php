@@ -16,22 +16,84 @@ $siteUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 
           . '://' . $_SERVER['HTTP_HOST'];
 
 /**
- * Run a .sql file using mysqli which handles multi-statement natively.
- * This avoids PDO's unbuffered query error (SQLSTATE HY000 2014).
+ * Run a .sql file using mysqli multi_query.
+ * Returns error string or empty string on success.
  */
-function run_sql_file(string $host, int $port, string $user, string $pass, string $db, string $file): void {
-    if (!file_exists($file)) return;
+function run_sql_file(string $host, int $port, string $user, string $pass, string $db, string $file): string {
+    if (!file_exists($file)) return "File not found: $file";
 
     $mysqli = new mysqli($host, $user, $pass, $db, $port);
-    if ($mysqli->connect_errno) return;
+    if ($mysqli->connect_errno) return 'Connect error: ' . $mysqli->connect_error;
     $mysqli->set_charset('utf8mb4');
 
     $sql = file_get_contents($file);
-    // Execute all statements — mysqli::multi_query handles SET, CREATE, INSERT etc.
-    $mysqli->multi_query($sql);
-    // Flush all result sets to avoid "commands out of sync"
-    do { if ($res = $mysqli->store_result()) $res->free(); } while ($mysqli->next_result());
+    if (!$mysqli->multi_query($sql)) {
+        $err = $mysqli->error;
+        $mysqli->close();
+        return "SQL error in $file: $err";
+    }
+    do {
+        if ($res = $mysqli->store_result()) $res->free();
+    } while ($mysqli->more_results() && $mysqli->next_result());
+
+    $err = $mysqli->error;
     $mysqli->close();
+    return $err ?: '';
+}
+
+/**
+ * Run a single SQL statement safely, ignoring duplicate column / table errors.
+ * Used for the ALTER TABLE safety patch.
+ */
+function safe_exec(mysqli $db, string $sql): void {
+    $db->query($sql); // errors 1060 (dup col) / 1061 (dup key) are fine
+}
+
+/**
+ * Patch any existing DB to have all columns the seed needs.
+ * This runs BEFORE the seed so ALTER TABLE errors never block installation.
+ */
+function patch_schema(string $host, int $port, string $user, string $pass, string $db): string {
+    $mysqli = new mysqli($host, $user, $pass, $db, $port);
+    if ($mysqli->connect_errno) return 'Patch connect error: ' . $mysqli->connect_error;
+    $mysqli->set_charset('utf8mb4');
+
+    // parties — add color
+    safe_exec($mysqli, "ALTER TABLE parties ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT '#808080'");
+
+    // states — add type and total_seats
+    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS type ENUM('state','ut') DEFAULT 'state'");
+    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS total_seats INT DEFAULT 0");
+    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS capital VARCHAR(100) DEFAULT NULL");
+    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS region VARCHAR(80) DEFAULT NULL");
+
+    // leaders — add all score + meta columns
+    $leader_cols = [
+        "slug VARCHAR(200) DEFAULT NULL",
+        "constituency VARCHAR(200) DEFAULT NULL",
+        "role VARCHAR(200) DEFAULT NULL",
+        "photo_url VARCHAR(500) DEFAULT NULL",
+        "dob DATE DEFAULT NULL",
+        "education TEXT DEFAULT NULL",
+        "total_score DECIMAL(5,2) DEFAULT 0",
+        "attendance_score DECIMAL(5,2) DEFAULT 0",
+        "promise_score DECIMAL(5,2) DEFAULT 0",
+        "criminal_score DECIMAL(5,2) DEFAULT 0",
+        "fund_score DECIMAL(5,2) DEFAULT 0",
+        "transparency_score DECIMAL(5,2) DEFAULT 0",
+        "verified TINYINT(1) DEFAULT 0",
+        "status ENUM('active','inactive','banned') DEFAULT 'active'",
+    ];
+    foreach ($leader_cols as $col_def) {
+        $col_name = explode(' ', trim($col_def))[0];
+        safe_exec($mysqli, "ALTER TABLE leaders ADD COLUMN IF NOT EXISTS $col_def");
+    }
+
+    // Add unique index on leaders.slug (ignore if exists)
+    safe_exec($mysqli, "ALTER TABLE leaders ADD UNIQUE INDEX IF NOT EXISTS idx_leaders_slug (slug)");
+
+    $mysqli->close();
+    return '';
 }
 
 // ---- Process Step 2 form ----------------------------------------
@@ -50,20 +112,29 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif (strlen($aPass) < 6)    $error = 'Admin password must be at least 6 characters.';
     else {
         try {
-            // Step A: Create the database using PDO (no schema yet)
+            // Step A: Create the database
             $pdo0 = new PDO(
                 "mysql:host=$dbHost;port=$dbPort;charset=utf8mb4",
                 $dbUser, $dbPass,
                 [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
             );
             $pdo0->exec("CREATE DATABASE IF NOT EXISTS `$dbName` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-            $pdo0 = null; // close connection
+            $pdo0 = null;
 
-            // Step B: Run schema + seed via mysqli (handles SET + multi-stmt safely)
-            run_sql_file($dbHost, $dbPort, $dbUser, $dbPass, $dbName, $root . '/installer/schema.sql');
-            run_sql_file($dbHost, $dbPort, $dbUser, $dbPass, $dbName, $root . '/database/seed_states_leaders.sql');
+            // Step B: Run schema.sql (creates tables)
+            $e = run_sql_file($dbHost, $dbPort, $dbUser, $dbPass, $dbName, $root . '/installer/schema.sql');
+            if ($e) throw new RuntimeException('Schema error: ' . $e);
 
-            // Step C: Use a fresh PDO (now on the created DB) for inserts only
+            // Step C: Safety ALTER TABLE patch — ensures all columns exist
+            // even if an OLD schema.sql was already on the server
+            $e = patch_schema($dbHost, $dbPort, $dbUser, $dbPass, $dbName);
+            if ($e) throw new RuntimeException($e);
+
+            // Step D: Run seed (parties, states, leaders)
+            $e = run_sql_file($dbHost, $dbPort, $dbUser, $dbPass, $dbName, $root . '/database/seed_states_leaders.sql');
+            if ($e) throw new RuntimeException('Seed error: ' . $e);
+
+            // Step E: Fresh PDO for admin user + settings inserts
             $pdo = new PDO(
                 "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
                 $dbUser, $dbPass,
@@ -74,7 +145,6 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]
             );
 
-            // Generate API token
             $token = gen_token();
 
             // Write .env file
@@ -93,17 +163,17 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
             ]) . "\n";
             file_put_contents($root . '/.env', $envContent);
 
-            // Insert/update settings (schema uses `key` column, not key_name)
+            // Settings inserts
             $ins = $pdo->prepare("INSERT IGNORE INTO settings (`key`, value, type, group_name, label) VALUES (?, ?, 'string', 'general', ?)");
             foreach ([
-                ['admin_api_token', $token,    'Admin API Token'],
-                ['site_url',        $siteUrl,  'Site URL'],
+                ['admin_api_token', $token,            'Admin API Token'],
+                ['site_url',        $siteUrl,          'Site URL'],
                 ['site_name',       'NetaTrack India', 'Site Name'],
             ] as [$k, $v, $l]) {
                 try { $ins->execute([$k, $v, $l]); } catch (PDOException $e) {}
             }
 
-            // Create admin user (schema uses password_hash column, role_id=1 for super_admin)
+            // Admin user
             $pdo->prepare(
                 "INSERT IGNORE INTO users (name, email, password_hash, role_id) VALUES (?, ?, ?, 1)"
             )->execute([$aName, $aEmail, password_hash($aPass, PASSWORD_BCRYPT)]);
@@ -291,11 +361,11 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
       </button>
     </div>
     <div style="font-size:.75rem;color:#475569;margin-bottom:16px">
-      Python app → Settings → Push API Token → paste here
+      Python app → .env → API_KEY=paste here
     </div>
 
     <div class="btns">
-      <a href="/admin" class="btn2 primary">🏛 Admin Panel</a>
+      <a href="/admin" class="btn2 primary">🏗 Admin Panel</a>
       <a href="/"      class="btn2">🌐 View Site</a>
     </div>
 
