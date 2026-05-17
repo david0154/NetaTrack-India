@@ -1,90 +1,125 @@
 <?php
 namespace NetaTrack\Controllers;
 
-use NetaTrack\Core\Controller;
+use NetaTrack\Core\{Controller, Request, Response};
 use NetaTrack\Models\User;
 
-class AuthController extends Controller {
-    public function loginForm(): void {
-        $this->view('auth.login', ['title' => 'Admin Login'], 'auth');
+class AuthController extends Controller
+{
+    private User $users;
+
+    public function __construct()
+    {
+        $this->users = new User();
     }
 
-    public function login(): void {
-        if (!$this->verifyCsrf()) {
-            $this->flash('error', 'Invalid CSRF token.');
-            $this->redirect('/login');
+    // GET /auth/login
+    public function loginForm(Request $req, Response $res): void
+    {
+        if (auth()->check()) { $res->redirect(''); return; }
+        $res->view('auth/login', ['page_title' => 'Login']);
+    }
+
+    // POST /auth/login
+    public function login(Request $req, Response $res): void
+    {
+        if (!$req->verifyCsrf()) { $res->redirect('auth/login'); return; }
+
+        $email    = trim($req->post('email',''));
+        $password = $req->post('password','');
+        $user     = $this->users->findByEmail($email);
+
+        if (!$user || !$this->users->verifyPassword($password, $user['password'])) {
+            flash('error', 'Invalid email or password.');
+            $res->redirect('auth/login');
+            return;
         }
 
-        $email = trim((string)$this->input('email'));
-        $password = (string)$this->input('password');
-
-        $user = User::verify($email, $password);
-        if (!$user) {
-            $this->flash('error', 'Invalid credentials.');
-            $this->redirect('/login');
+        if ($user['status'] === 'banned') {
+            flash('error', 'Your account has been suspended.');
+            $res->redirect('auth/login');
+            return;
         }
 
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['user_name'] = $user['name'];
-        $_SESSION['user_role'] = $user['role'];
-        $_SESSION['user_email'] = $user['email'];
+        // Regenerate session
         session_regenerate_id(true);
-
-        $this->flash('success', 'Welcome back, ' . $user['name'] . '.');
-        $this->redirect('/admin');
-    }
-
-    public function registerForm(): void {
-        $this->view('auth.register', ['title' => 'Create Account'], 'auth');
-    }
-
-    public function register(): void {
-        if (!$this->verifyCsrf()) {
-            $this->flash('error', 'Invalid CSRF token.');
-            $this->redirect('/register');
-        }
-
-        $name = trim((string)$this->input('name'));
-        $email = trim((string)$this->input('email'));
-        $password = (string)$this->input('password');
-
-        if (!$name || !$email || !$password) {
-            $this->flash('error', 'All fields are required.');
-            $this->redirect('/register');
-        }
-
-        if (User::findByEmail($email)) {
-            $this->flash('error', 'Email already exists.');
-            $this->redirect('/register');
-        }
-
-        $id = User::create([
-            'name' => $name,
-            'email' => $email,
-            'password' => $password,
-            'role' => 'admin'
-        ]);
-
-        $user = User::find($id);
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['user_name'] = $user['name'];
+        $_SESSION['user_id']   = $user['id'];
         $_SESSION['user_role'] = $user['role'];
-        $_SESSION['user_email'] = $user['email'];
-        session_regenerate_id(true);
 
-        $this->flash('success', 'Admin account created successfully.');
-        $this->redirect('/admin');
+        $redirect = $user['role'] === 'admin' ? 'admin' : '';
+        $res->redirect($redirect);
     }
 
-    public function logout(): void {
-        $_SESSION = [];
-        if (ini_get('session.use_cookies')) {
-            $params = session_get_cookie_params();
-            setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'] ?? '', $params['secure'] ?? false, $params['httponly'] ?? true);
+    // GET /auth/register
+    public function registerForm(Request $req, Response $res): void
+    {
+        if (auth()->check()) { $res->redirect(''); return; }
+        $res->view('auth/register', ['page_title' => 'Register']);
+    }
+
+    // POST /auth/register
+    public function register(Request $req, Response $res): void
+    {
+        if (!$req->verifyCsrf()) { $res->redirect('auth/register'); return; }
+
+        $name     = trim($req->post('name',''));
+        $email    = trim($req->post('email',''));
+        $password = $req->post('password','');
+        $confirm  = $req->post('password_confirm','');
+
+        $errors = [];
+        if (strlen($name) < 2)      $errors[] = 'Name is too short.';
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Invalid email address.';
+        if (strlen($password) < 8)  $errors[] = 'Password must be at least 8 characters.';
+        if ($password !== $confirm)  $errors[] = 'Passwords do not match.';
+        if ($this->users->findByEmail($email)) $errors[] = 'Email is already registered.';
+
+        if ($errors) {
+            flash('error', implode(' ', $errors));
+            $res->redirect('auth/register');
+            return;
         }
+
+        $id = $this->users->create(['name'=>$name,'email'=>$email,'password'=>$password]);
+        session_regenerate_id(true);
+        $_SESSION['user_id']   = $id;
+        $_SESSION['user_role'] = 'user';
+        flash('success', 'Welcome to NetaTrack!');
+        $res->redirect('');
+    }
+
+    // GET /auth/logout
+    public function logout(Request $req, Response $res): void
+    {
         session_destroy();
-        session_start();
-        $_SESSION['flash']['success'][] = 'Logged out successfully.';
-        $this->redirect('/login');
+        $res->redirect('auth/login');
+    }
+
+    // GET /admin/auth/login  (separate admin login)
+    public function adminLoginForm(Request $req, Response $res): void
+    {
+        if (auth()->isAdmin()) { $res->redirect('admin'); return; }
+        $res->view('auth/admin-login', ['page_title' => 'Admin Login']);
+    }
+
+    // POST /admin/auth/login
+    public function adminLogin(Request $req, Response $res): void
+    {
+        if (!$req->verifyCsrf()) { $res->redirect('admin/auth/login'); return; }
+
+        $email    = trim($req->post('email',''));
+        $password = $req->post('password','');
+        $user     = $this->users->findByEmail($email);
+
+        if (!$user || $user['role'] !== 'admin' || !$this->users->verifyPassword($password, $user['password'])) {
+            flash('error', 'Invalid credentials or insufficient permissions.');
+            $res->redirect('admin/auth/login');
+            return;
+        }
+
+        session_regenerate_id(true);
+        $_SESSION['user_id']   = $user['id'];
+        $_SESSION['user_role'] = 'admin';
+        $res->redirect('admin');
     }
 }
