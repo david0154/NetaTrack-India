@@ -1,17 +1,16 @@
 <?php
 /**
  * NetaTrack India - Front Controller
+ * All requests are routed through here via .htaccess
  */
+
+declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+// Load routes
+require ROOT_PATH . '/routes/web.php';
+require ROOT_PATH . '/routes/api.php';
 
-// Route to API or Web
-if (str_starts_with($uri, '/api/')) {
-    $router = require __DIR__ . '/routes/api.php';
-} else {
-    $router = require __DIR__ . '/routes/web.php';
-}
-
-$router->dispatch();
+// Dispatch
+NetaTrack\Core\Router::dispatch();

@@ -5,110 +5,66 @@
 
 use NetaTrack\Core\Router;
 
-$router = new Router();
+// ─── Public Routes ─────────────────────────────────────────────────────────
+Router::get('/', [\NetaTrack\Controllers\HomeController::class, 'index'], 'home');
+Router::get('/leaders', [\NetaTrack\Controllers\LeaderController::class, 'index'], 'leaders.index');
+Router::get('/leaders/{slug}', [\NetaTrack\Controllers\LeaderController::class, 'show'], 'leaders.show');
+Router::get('/projects', [\NetaTrack\Controllers\ProjectController::class, 'index'], 'projects.index');
+Router::get('/projects/{id}', [\NetaTrack\Controllers\ProjectController::class, 'show'], 'projects.show');
+Router::get('/promises', [\NetaTrack\Controllers\PromiseController::class, 'index'], 'promises.index');
+Router::get('/states', [\NetaTrack\Controllers\StateController::class, 'index'], 'states.index');
+Router::get('/states/{slug}', [\NetaTrack\Controllers\StateController::class, 'show'], 'states.show');
+Router::get('/corruption', [\NetaTrack\Controllers\CorruptionController::class, 'index'], 'corruption.index');
+Router::get('/submit-report', [\NetaTrack\Controllers\ReportController::class, 'create'], 'report.create');
+Router::post('/submit-report', [\NetaTrack\Controllers\ReportController::class, 'store'], 'report.store');
+Router::get('/search', [\NetaTrack\Controllers\SearchController::class, 'index'], 'search');
 
-// ============================================================
-// PUBLIC ROUTES
-// ============================================================
-$router->get('/', 'HomeController@index');
-$router->get('/leaders', 'LeaderController@index');
-$router->get('/leader/{uuid}', 'LeaderController@show');
-$router->get('/states', 'StateController@index');
-$router->get('/state/{code}', 'StateController@show');
-$router->get('/promises', 'PromiseController@index');
-$router->get('/promise/{uuid}', 'PromiseController@show');
-$router->get('/projects', 'ProjectController@index');
-$router->get('/project/{uuid}', 'ProjectController@show');
-$router->get('/corruption', 'CorruptionController@index');
-$router->get('/fake-claims', 'PromiseController@fakeClaims');
-$router->get('/reports', 'ReportController@publicIndex');
-$router->get('/report/{uuid}', 'ReportController@publicShow');
-$router->get('/search', 'SearchController@index');
+// ─── Auth Routes ────────────────────────────────────────────────────────────
+Router::group(['prefix' => 'auth', 'name' => 'auth.'], function () {
+    Router::get('/login',    [\NetaTrack\Controllers\Auth\LoginController::class, 'showLogin'],    'login');
+    Router::post('/login',   [\NetaTrack\Controllers\Auth\LoginController::class, 'login'],        'login.post');
+    Router::get('/register', [\NetaTrack\Controllers\Auth\RegisterController::class, 'showForm'], 'register');
+    Router::post('/register',[\NetaTrack\Controllers\Auth\RegisterController::class, 'register'],  'register.post');
+    Router::get('/logout',   [\NetaTrack\Controllers\Auth\LoginController::class, 'logout'],       'logout');
+    Router::get('/forgot-password', [\NetaTrack\Controllers\Auth\ForgotPasswordController::class, 'show'], 'forgot');
+    Router::post('/forgot-password',[\NetaTrack\Controllers\Auth\ForgotPasswordController::class, 'send'], 'forgot.post');
+});
 
-// AUTH ROUTES
-$router->get('/login', 'AuthController@loginForm');
-$router->post('/login', 'AuthController@login');
-$router->get('/register', 'AuthController@registerForm');
-$router->post('/register', 'AuthController@register');
-$router->get('/logout', 'AuthController@logout');
-$router->get('/forgot-password', 'AuthController@forgotPasswordForm');
-$router->post('/forgot-password', 'AuthController@forgotPassword');
-$router->get('/reset-password/{token}', 'AuthController@resetPasswordForm');
-$router->post('/reset-password', 'AuthController@resetPassword');
+// ─── Admin Routes ────────────────────────────────────────────────────────────
+Router::group(['prefix' => 'admin', 'name' => 'admin.', 'middleware' => ['AdminMiddleware']], function () {
+    Router::get('/',                 [\NetaTrack\Controllers\Admin\DashboardController::class, 'index'],    'dashboard');
+    Router::get('/leaders',          [\NetaTrack\Controllers\Admin\LeaderAdminController::class, 'index'], 'leaders');
+    Router::get('/leaders/create',   [\NetaTrack\Controllers\Admin\LeaderAdminController::class, 'create'],'leaders.create');
+    Router::post('/leaders',         [\NetaTrack\Controllers\Admin\LeaderAdminController::class, 'store'],  'leaders.store');
+    Router::get('/leaders/{id}/edit',[\NetaTrack\Controllers\Admin\LeaderAdminController::class, 'edit'],  'leaders.edit');
+    Router::post('/leaders/{id}',    [\NetaTrack\Controllers\Admin\LeaderAdminController::class, 'update'],'leaders.update');
+    Router::post('/leaders/{id}/delete',[\NetaTrack\Controllers\Admin\LeaderAdminController::class, 'delete'],'leaders.delete');
 
-// USER ACCOUNT ROUTES (requires auth)
-$router->get('/my-account', 'UserController@dashboard', ['NetaTrack\Middleware\AuthMiddleware']);
-$router->get('/my-reports', 'UserController@myReports', ['NetaTrack\Middleware\AuthMiddleware']);
-$router->get('/submit-report', 'ReportController@submitForm', ['NetaTrack\Middleware\AuthMiddleware']);
-$router->post('/submit-report', 'ReportController@submit', ['NetaTrack\Middleware\AuthMiddleware']);
+    Router::get('/projects',         [\NetaTrack\Controllers\Admin\ProjectAdminController::class, 'index'], 'projects');
+    Router::get('/projects/create',  [\NetaTrack\Controllers\Admin\ProjectAdminController::class, 'create'],'projects.create');
+    Router::post('/projects',        [\NetaTrack\Controllers\Admin\ProjectAdminController::class, 'store'], 'projects.store');
+    Router::get('/projects/{id}/edit',[\NetaTrack\Controllers\Admin\ProjectAdminController::class, 'edit'],'projects.edit');
+    Router::post('/projects/{id}',   [\NetaTrack\Controllers\Admin\ProjectAdminController::class, 'update'],'projects.update');
 
-// ============================================================
-// ADMIN ROUTES
-// ============================================================
-$router->group('/admin', function(Router $r) {
-    $r->get('', 'Admin\DashboardController@index');
-    $r->get('/login', 'Admin\AuthController@loginForm');
-    $r->post('/login', 'Admin\AuthController@login');
-    $r->get('/logout', 'Admin\AuthController@logout');
+    Router::get('/promises',         [\NetaTrack\Controllers\Admin\PromiseAdminController::class, 'index'], 'promises');
+    Router::get('/promises/create',  [\NetaTrack\Controllers\Admin\PromiseAdminController::class, 'create'],'promises.create');
+    Router::post('/promises',        [\NetaTrack\Controllers\Admin\PromiseAdminController::class, 'store'], 'promises.store');
 
-    // Leaders
-    $r->get('/leaders', 'Admin\LeaderController@index');
-    $r->get('/leaders/create', 'Admin\LeaderController@create');
-    $r->post('/leaders/create', 'Admin\LeaderController@store');
-    $r->get('/leaders/{id}/edit', 'Admin\LeaderController@edit');
-    $r->post('/leaders/{id}/edit', 'Admin\LeaderController@update');
-    $r->delete('/leaders/{id}', 'Admin\LeaderController@destroy');
+    Router::get('/reports',          [\NetaTrack\Controllers\Admin\ReportAdminController::class, 'index'],  'reports');
+    Router::post('/reports/{id}/approve',[\NetaTrack\Controllers\Admin\ReportAdminController::class, 'approve'],'reports.approve');
+    Router::post('/reports/{id}/reject', [\NetaTrack\Controllers\Admin\ReportAdminController::class, 'reject'], 'reports.reject');
 
-    // Promises
-    $r->get('/promises', 'Admin\PromiseController@index');
-    $r->post('/promises', 'Admin\PromiseController@store');
-    $r->post('/promises/{id}/update', 'Admin\PromiseController@update');
-    $r->delete('/promises/{id}', 'Admin\PromiseController@destroy');
+    Router::get('/users',            [\NetaTrack\Controllers\Admin\UserAdminController::class, 'index'],    'users');
+    Router::post('/users/{id}/ban',  [\NetaTrack\Controllers\Admin\UserAdminController::class, 'ban'],      'users.ban');
 
-    // Projects
-    $r->get('/projects', 'Admin\ProjectController@index');
-    $r->post('/projects', 'Admin\ProjectController@store');
-    $r->post('/projects/{id}/update', 'Admin\ProjectController@update');
-    $r->delete('/projects/{id}', 'Admin\ProjectController@destroy');
+    Router::get('/settings',         [\NetaTrack\Controllers\Admin\SettingsController::class, 'index'],     'settings');
+    Router::post('/settings',        [\NetaTrack\Controllers\Admin\SettingsController::class, 'update'],    'settings.update');
 
-    // Reports
-    $r->get('/reports', 'Admin\ReportController@index');
-    $r->post('/reports/{id}/approve', 'Admin\ReportController@approve');
-    $r->post('/reports/{id}/reject', 'Admin\ReportController@reject');
-    $r->post('/reports/{id}/merge', 'Admin\ReportController@merge');
+    Router::get('/analytics',        [\NetaTrack\Controllers\Admin\AnalyticsController::class, 'index'],    'analytics');
+    Router::get('/scraper',          [\NetaTrack\Controllers\Admin\ScraperController::class, 'index'],      'scraper');
+});
 
-    // Scraper
-    $r->get('/scraper', 'Admin\ScraperController@index');
-    $r->post('/scraper/jobs', 'Admin\ScraperController@createJob');
-    $r->post('/scraper/jobs/{id}/toggle', 'Admin\ScraperController@toggleJob');
-    $r->post('/scraper/jobs/{id}/retry', 'Admin\ScraperController@retryJob');
-    $r->get('/scraper/queue', 'Admin\ScraperController@queue');
-    $r->post('/scraper/queue/{id}/approve', 'Admin\ScraperController@approveItem');
-    $r->post('/scraper/queue/{id}/reject', 'Admin\ScraperController@rejectItem');
-
-    // Settings
-    $r->get('/settings', 'Admin\SettingsController@index');
-    $r->post('/settings', 'Admin\SettingsController@update');
-    $r->get('/settings/smtp', 'Admin\SettingsController@smtp');
-    $r->post('/settings/smtp', 'Admin\SettingsController@updateSmtp');
-    $r->get('/settings/ads', 'Admin\SettingsController@ads');
-    $r->post('/settings/ads', 'Admin\SettingsController@updateAds');
-    $r->get('/settings/seo', 'Admin\SettingsController@seo');
-    $r->post('/settings/seo', 'Admin\SettingsController@updateSeo');
-
-    // Users
-    $r->get('/users', 'Admin\UserController@index');
-    $r->post('/users/{id}/ban', 'Admin\UserController@ban');
-    $r->post('/users/{id}/unban', 'Admin\UserController@unban');
-
-    // States & Parties
-    $r->get('/states', 'Admin\StateController@index');
-    $r->post('/states', 'Admin\StateController@store');
-    $r->post('/states/{id}/update', 'Admin\StateController@update');
-    $r->get('/parties', 'Admin\PartyController@index');
-    $r->post('/parties', 'Admin\PartyController@store');
-    $r->post('/parties/{id}/update', 'Admin\PartyController@update');
-
-}, ['NetaTrack\Middleware\AdminMiddleware']);
-
-return $router;
+// Admin Login (outside middleware)
+Router::get('/admin/login',  [\NetaTrack\Controllers\Auth\AdminLoginController::class, 'show'],  'admin.login');
+Router::post('/admin/login', [\NetaTrack\Controllers\Auth\AdminLoginController::class, 'login'], 'admin.login.post');
+Router::get('/admin/logout', [\NetaTrack\Controllers\Auth\AdminLoginController::class, 'logout'],'admin.logout');
