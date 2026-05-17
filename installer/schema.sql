@@ -1,5 +1,5 @@
 -- NetaTrack India — Complete Database Schema
--- Matches seed_states_leaders.sql columns exactly
+-- Matches seed_states_leaders.sql exactly
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS states (
 CREATE TABLE IF NOT EXISTS leaders (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
-    slug VARCHAR(200) NOT NULL UNIQUE,
+    slug VARCHAR(200) UNIQUE DEFAULT NULL,
     party_id INT DEFAULT NULL,
     state_id INT DEFAULT NULL,
     constituency VARCHAR(200) DEFAULT NULL,
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS leaders (
 
 CREATE TABLE IF NOT EXISTS projects (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    slug VARCHAR(200) NOT NULL UNIQUE,
+    slug VARCHAR(200) UNIQUE DEFAULT NULL,
     title VARCHAR(300) NOT NULL,
     description LONGTEXT DEFAULT NULL,
     category VARCHAR(120) DEFAULT NULL,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE TABLE IF NOT EXISTS promises (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    slug VARCHAR(200) NOT NULL UNIQUE,
+    slug VARCHAR(200) UNIQUE DEFAULT NULL,
     title VARCHAR(300) NOT NULL,
     description LONGTEXT NOT NULL,
     leader_id INT DEFAULT NULL,
