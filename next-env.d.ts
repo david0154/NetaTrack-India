@@ -1,2 +1,1 @@
-/// <reference types="next" />
-/// <reference types="next/image-types/global" />
+// DELETED - leftover Next.js TypeScript env file
