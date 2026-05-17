@@ -1,18 +1,19 @@
 """
 NetaTrack India — Python Admin App
-AI model required (~60MB, CPU only, no C++, auto-downloaded on first run).
+Requires: pip install -r requirements.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
 """
 import tkinter as tk
 from tkinter import messagebox
 import os
 import sys
+
+# Make sure python-admin/ is in path
+sys.path.insert(0, os.path.dirname(__file__))
+
 from db.connection import DBConnection
 from ui.connect_dialog import ConnectDialog
 from ui.main_window import MainWindow
-from auto.model_downloader import (
-    ensure_model_with_ui, _backend, install_backend_guide
-)
-from auto.local_ai import set_sentiment_pipe
 
 LOGO_URL = "https://raw.githubusercontent.com/david0154/NetaTrack-India/main/logo.png"
 
@@ -37,39 +38,70 @@ def load_logo(root: tk.Tk):
         import urllib.request, tempfile
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         urllib.request.urlretrieve(LOGO_URL, tmp.name)
-        from PIL import Image, ImageTk
-        img = Image.open(tmp.name).resize((32, 32), Image.LANCZOS)
-        return ImageTk.PhotoImage(img)
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(tmp.name).resize((32, 32), Image.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except ImportError:
+            return tk.PhotoImage(file=tmp.name).subsample(10, 10)
     except Exception:
         return None
 
 
-def check_backend(root: tk.Tk) -> bool:
-    """Check torch/onnx installed. Show error if missing. Returns True if OK."""
+def check_deps() -> bool:
+    """Check required packages. Show error if missing."""
+    missing = []
     try:
-        import transformers  # noqa
+        import mysql.connector  # noqa
     except ImportError:
-        messagebox.showerror(
-            "Missing: transformers",
-            "Run: pip install transformers\nThen restart the app."
-        )
-        return False
+        missing.append("mysql-connector-python")
+    try:
+        import requests  # noqa
+    except ImportError:
+        missing.append("requests")
 
-    if _backend() == 'none':
+    if missing:
         messagebox.showerror(
-            "Missing: PyTorch or ONNX Runtime",
-            install_backend_guide()
+            "Missing packages",
+            "Run this first:\n\n"
+            f"pip install {' '.join(missing)}\n\n"
+            "Then restart the app."
         )
         return False
     return True
 
 
+def try_load_ai(root: tk.Tk, app: MainWindow):
+    """Try to load AI model in background after window opens."""
+    try:
+        from auto.model_downloader import ensure_model_with_ui
+        from auto.local_ai import set_sentiment_pipe
+
+        def _on_done(pipe):
+            if pipe:
+                set_sentiment_pipe(pipe)
+                app.set_status("\ud83e\udd16 AI Ready", "#22c55e")
+            else:
+                app.set_status("\u26a0\ufe0f AI unavailable — rule-based only", "#f59e0b")
+
+        ensure_model_with_ui(root, on_done=_on_done)
+    except Exception:
+        # AI module not available — continue without it
+        pass
+
+
 def main():
     root = tk.Tk()
-    root.withdraw()
-    root.title("NetaTrack India — Admin")
+    root.withdraw()  # hide until DB connected
+    root.title("NetaTrack India")
     root.configure(bg="#0f172a")
 
+    # Check basic deps
+    if not check_deps():
+        root.destroy()
+        return
+
+    # Load logo
     logo_img = load_logo(root)
     if logo_img:
         try:
@@ -77,36 +109,20 @@ def main():
         except Exception:
             pass
 
-    # --- Step 1: Check backend installed ---------------------------------
-    if not check_backend(root):
-        root.destroy()
-        sys.exit(1)
-
-    # --- Step 2: DB connect ----------------------------------------------
+    # DB connect dialog
     db = DBConnection()
     dialog = ConnectDialog(root, db)
     root.wait_window(dialog.window)
+
     if not db.is_connected():
         root.destroy()
         return
 
-    # --- Step 3: Show main window (immediately usable) -------------------
+    # Build main window
     app = MainWindow(root, db, logo_img=logo_img)
 
-    # --- Step 4: Download/load AI model (shows progress if first time) ---
-    def _on_model_ready(pipe):
-        if pipe is None:
-            messagebox.showwarning(
-                "AI Model Failed",
-                "Could not load sentiment model.\n"
-                "Analysis will use rule-based fallback.\n"
-                "Check internet connection and try again."
-            )
-        else:
-            set_sentiment_pipe(pipe)
-            app.set_status("🤖 AI Ready — sentiment model loaded", "#22c55e")
-
-    ensure_model_with_ui(root, on_done=_on_model_ready)
+    # Load AI model in background (non-blocking)
+    root.after(800, lambda: try_load_ai(root, app))
 
     root.mainloop()
 

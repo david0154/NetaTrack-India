@@ -1,102 +1,118 @@
+"""
+NetaTrack India — Dashboard Tab
+Shows live stats from DB.
+"""
 import tkinter as tk
 from tkinter import ttk
 
 
 class DashboardTab:
     def __init__(self, parent, db, set_status):
-        self.parent = parent
         self.db = db
         self.set_status = set_status
-        self._build()
-        self.load()
+        self._build(parent)
+        self._refresh()
 
-    def _build(self):
-        self.parent.configure(style="TFrame")
-        tk.Label(self.parent, text="Platform Overview", font=("Segoe UI", 14, "bold"),
-                 bg="#0f172a", fg="#f8fafc").pack(anchor="w", padx=20, pady=(16, 8))
+    def _build(self, parent):
+        tk.Label(parent, text="\ud83d\udcca  Dashboard",
+                 font=("Segoe UI", 14, "bold"),
+                 bg="#0f172a", fg="#f8fafc").pack(
+            anchor="w", padx=24, pady=(20, 12)
+        )
 
-        # Stats frame
-        self.stats_frame = tk.Frame(self.parent, bg="#0f172a")
-        self.stats_frame.pack(fill="x", padx=20, pady=(0, 16))
+        # Stat cards row
+        self._cards_frame = tk.Frame(parent, bg="#0f172a")
+        self._cards_frame.pack(fill="x", padx=24)
 
-        # Recent activity
-        mid = tk.Frame(self.parent, bg="#0f172a")
-        mid.pack(fill="both", expand=True, padx=20, pady=0)
-        mid.columnconfigure(0, weight=1)
-        mid.columnconfigure(1, weight=1)
+        self._stats = {
+            "Leaders":      ("\ud83d\udc64", "leaders",       "#3b82f6"),
+            "Reports":      ("\ud83d\udccb", "reports",       "#f59e0b"),
+            "Users":        ("\ud83d\udc65", "users",         "#22c55e"),
+            "Announcements":("\ud83d\udcf0", "announcements", "#a855f7"),
+            "Parties":      ("\ud83c\udff7\ufe0f",  "parties",      "#ef4444"),
+            "States":       ("\ud83d\uddfa\ufe0f", "states",       "#06b6d4"),
+        }
+        self._card_vars = {}
+        for label, (icon, table, color) in self._stats.items():
+            card = tk.Frame(self._cards_frame,
+                            bg="#1e293b", padx=20, pady=14,
+                            relief="flat")
+            card.pack(side="left", padx=(0, 12), pady=4)
+            tk.Label(card, text=icon,
+                     font=("Segoe UI", 20),
+                     bg="#1e293b", fg=color).pack()
+            var = tk.StringVar(value="...")
+            self._card_vars[table] = var
+            tk.Label(card, textvariable=var,
+                     font=("Segoe UI", 18, "bold"),
+                     bg="#1e293b", fg="#f8fafc").pack()
+            tk.Label(card, text=label,
+                     font=("Segoe UI", 8),
+                     bg="#1e293b", fg="#64748b").pack()
 
-        # Pending reports
-        lf1 = tk.LabelFrame(mid, text=" ⏳ Pending Reports ", bg="#1e293b", fg="#94a3b8",
-                             font=("Segoe UI", 10, "bold"), relief="flat", bd=1)
-        lf1.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=4)
-        self.pending_tree = self._make_tree(lf1, ["ID", "Leader", "Type", "Date"], [40, 160, 100, 90])
+        # Recent leaders
+        tk.Label(parent, text="Top Leaders by Score",
+                 font=("Segoe UI", 11, "bold"),
+                 bg="#0f172a", fg="#94a3b8").pack(
+            anchor="w", padx=24, pady=(24, 6)
+        )
 
-        # Top leaders
-        lf2 = tk.LabelFrame(mid, text=" 🏆 Top Leaders ", bg="#1e293b", fg="#94a3b8",
-                             font=("Segoe UI", 10, "bold"), relief="flat", bd=1)
-        lf2.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=4)
-        self.leaders_tree = self._make_tree(lf2, ["Name", "Party", "Score", "Rank"], [160, 80, 60, 50])
+        tree_frame = tk.Frame(parent, bg="#0f172a")
+        tree_frame.pack(fill="both", expand=True, padx=24, pady=(0, 24))
 
-    def _make_tree(self, parent, cols, widths):
-        frame = tk.Frame(parent, bg="#1e293b")
-        frame.pack(fill="both", expand=True, padx=4, pady=4)
-        tree = ttk.Treeview(frame, columns=cols, show="headings", height=12)
-        for col, w in zip(cols, widths):
-            tree.heading(col, text=col)
-            tree.column(col, width=w, minwidth=30)
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
-        return tree
+        cols = ("name", "party", "state", "role", "score")
+        self._tree = ttk.Treeview(tree_frame, columns=cols,
+                                  show="headings", height=12)
+        heads = {"name": "Leader", "party": "Party",
+                 "state": "State", "role": "Role", "score": "Score"}
+        widths = {"name": 200, "party": 120, "state": 140,
+                  "role": 200, "score": 70}
+        for c in cols:
+            self._tree.heading(c, text=heads[c])
+            self._tree.column(c, width=widths[c], minwidth=60)
 
-    def load(self):
+        sb = ttk.Scrollbar(tree_frame, command=self._tree.yview)
+        self._tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self._tree.pack(fill="both", expand=True)
+
+        # Refresh button
+        tk.Button(parent, text="\ud83d\udd04  Refresh",
+                  font=("Segoe UI", 9),
+                  bg="#1e293b", fg="#94a3b8",
+                  relief="flat", cursor="hand2",
+                  padx=14, pady=6,
+                  command=self._refresh).pack(anchor="w", padx=24, pady=(0, 16))
+
+    def _refresh(self):
+        # Update stat cards
+        for label, (icon, table, color) in self._stats.items():
+            try:
+                row = self.db.fetchone(f"SELECT COUNT(*) AS c FROM `{table}`")
+                self._card_vars[table].set(str(row["c"]) if row else "0")
+            except Exception:
+                self._card_vars[table].set("-")
+
+        # Update top leaders tree
         try:
-            # Stat cards
-            for w in self.stats_frame.winfo_children():
-                w.destroy()
-            queries = [
-                ("Leaders",          "SELECT COUNT(*) as c FROM leaders",          "👤", "#f97316"),
-                ("Promises",         "SELECT COUNT(*) as c FROM promises",         "📜", "#3b82f6"),
-                ("Projects",         "SELECT COUNT(*) as c FROM projects",         "🏗️", "#22c55e"),
-                ("Reports (total)",  "SELECT COUNT(*) as c FROM reports",          "📋", "#8b5cf6"),
-                ("Pending",          "SELECT COUNT(*) as c FROM reports WHERE status='pending'", "⏳", "#ef4444"),
-                ("Users",            "SELECT COUNT(*) as c FROM users",            "👥", "#06b6d4"),
-            ]
-            for label, sql, icon, color in queries:
-                try:
-                    row = self.db.fetchone(sql)
-                    val = row["c"] if row else 0
-                except Exception:
-                    val = "N/A"
-                card = tk.Frame(self.stats_frame, bg="#1e293b", width=140, height=88, relief="flat")
-                card.pack(side="left", padx=6, pady=4)
-                card.pack_propagate(False)
-                tk.Frame(card, bg=color, height=3).pack(fill="x")
-                tk.Label(card, text=icon, font=("Segoe UI Emoji", 18), bg="#1e293b").pack(pady=(6, 0))
-                tk.Label(card, text=str(val), font=("Segoe UI", 16, "bold"), bg="#1e293b", fg="#f8fafc").pack()
-                tk.Label(card, text=label, font=("Segoe UI", 8), bg="#1e293b", fg="#64748b").pack()
-
-            # Pending reports
-            for row in self.pending_tree.get_children():
-                self.pending_tree.delete(row)
             rows = self.db.fetchall(
-                "SELECT r.id, COALESCE(l.name,'Unknown') AS leader, r.type, DATE(r.created_at) AS d "
-                "FROM reports r LEFT JOIN leaders l ON r.leader_id=l.id WHERE r.status='pending' ORDER BY r.id DESC LIMIT 30"
+                "SELECT l.name, p.name AS party, s.name AS state, "
+                "l.role, l.total_score "
+                "FROM leaders l "
+                "LEFT JOIN parties p ON l.party_id=p.id "
+                "LEFT JOIN states  s ON l.state_id=s.id "
+                "WHERE l.status='active' "
+                "ORDER BY l.total_score DESC LIMIT 20"
             )
+            for item in self._tree.get_children():
+                self._tree.delete(item)
             for r in rows:
-                self.pending_tree.insert("", "end", values=(r["id"], r["leader"], r["type"], str(r["d"])))
-
-            # Top leaders
-            for row in self.leaders_tree.get_children():
-                self.leaders_tree.delete(row)
-            rows = self.db.fetchall(
-                "SELECT l.name, COALESCE(p.abbreviation,'?') AS party, l.total_score, l.score_rank "
-                "FROM leaders l LEFT JOIN parties p ON l.party_id=p.id ORDER BY l.total_score DESC LIMIT 20"
-            )
-            for r in rows:
-                self.leaders_tree.insert("", "end", values=(r["name"], r["party"], r["total_score"], r["score_rank"]))
-
-            self.set_status("🟢 Dashboard loaded", "#22c55e")
+                self._tree.insert("", "end", values=(
+                    r["name"] or "",
+                    r["party"] or "",
+                    r["state"] or "",
+                    r["role"] or "",
+                    r["total_score"] or 0
+                ))
         except Exception as e:
-            self.set_status(f"❌ {e}", "#f87171")
+            pass

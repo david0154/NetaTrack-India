@@ -1,105 +1,149 @@
-"""NetaTrack India — Main Window with logo in topbar."""
+"""
+NetaTrack India — Main Window
+Builds the tabbed main application window.
+"""
 import tkinter as tk
 from tkinter import ttk
-from db.connection import DBConnection
-from ui.tabs.dashboard_tab import DashboardTab
-from ui.tabs.leaders_tab import LeadersTab
-from ui.tabs.reports_tab import ReportsTab
-from ui.tabs.users_tab import UsersTab
-from ui.tabs.settings_tab import SettingsTab
-from ui.tabs.scraper_tab import ScraperTab
-from ui.tabs.auto_tab import AutoTab
 
 
 class MainWindow:
-    def __init__(self, root: tk.Tk, db: DBConnection, logo_img=None):
+    def __init__(self, root: tk.Tk, db, logo_img=None):
         self.root = root
-        self.db = db
-        self.logo_img = logo_img
-        self.root.title("NetaTrack India — Admin")
-        self.root.configure(bg="#0f172a")
+        self.db   = db
         self.root.deiconify()
-        self._set_size(1320, 780)
-        self.root.protocol("WM_DELETE_WINDOW", self._quit)
-        self._build()
+        self.root.title("NetaTrack India — Admin Panel")
+        self.root.configure(bg="#0f172a")
+        self.root.geometry("1100x700")
+        self.root.minsize(900, 600)
 
-    def _set_size(self, w, h):
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        self.root.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+        self._build_topbar(logo_img)
+        self._build_tabs()
+        self._status_bar()
 
-    def _build(self):
-        # Topbar
-        topbar = tk.Frame(self.root, bg="#1e293b", height=52)
-        topbar.pack(fill="x")
-        topbar.pack_propagate(False)
+    # ------------------------------------------------------------------ #
+    def _build_topbar(self, logo_img):
+        bar = tk.Frame(self.root, bg="#1e293b", height=48)
+        bar.pack(fill="x")
+        bar.pack_propagate(False)
 
-        # Logo image in topbar
-        if self.logo_img:
-            tk.Label(topbar, image=self.logo_img, bg="#1e293b",
-                     padx=10).pack(side="left", pady=8)
+        if logo_img:
+            tk.Label(bar, image=logo_img,
+                     bg="#1e293b").pack(side="left", padx=(12, 6))
+        tk.Label(bar,
+                 text="NetaTrack India — Admin Panel",
+                 font=("Segoe UI", 12, "bold"),
+                 bg="#1e293b", fg="#f8fafc").pack(side="left")
 
-        tk.Label(topbar, text="NetaTrack India  —  Admin Panel",
-                 font=("Segoe UI", 13, "bold"),
-                 bg="#1e293b", fg="#f8fafc", padx=(4 if self.logo_img else 16)).pack(side="left", pady=14)
+        self._status_var = tk.StringVar(value="Ready")
+        tk.Label(bar, textvariable=self._status_var,
+                 font=("Segoe UI", 9),
+                 bg="#1e293b", fg="#64748b").pack(side="right", padx=16)
 
-        tk.Label(topbar, text="🇮🇳",
-                 font=("Segoe UI", 16), bg="#1e293b").pack(side="left", pady=14)
-
-        tk.Button(topbar, text="🔄 Refresh", bg="#0f172a", fg="#94a3b8",
-                  relief="flat", font=("Segoe UI", 9),
-                  cursor="hand2", command=self._refresh).pack(side="right", padx=8, pady=10)
-        tk.Button(topbar, text="🚪 Disconnect", bg="#0f172a", fg="#f87171",
-                  relief="flat", font=("Segoe UI", 9),
-                  cursor="hand2", command=self._quit).pack(side="right", pady=10)
-
-        # Status bar
-        self._statusbar = tk.Label(
-            self.root, text="🟢 Connected",
-            bg="#020617", fg="#22c55e",
-            font=("Segoe UI", 8), anchor="w", padx=10
-        )
-        self._statusbar.pack(side="bottom", fill="x")
-
-        # Notebook tabs
+    # ------------------------------------------------------------------ #
+    def _build_tabs(self):
         style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TNotebook", background="#0f172a", borderwidth=0)
-        style.configure("TNotebook.Tab", background="#1e293b", foreground="#94a3b8",
-                        padding=[12, 6], font=("Segoe UI", 9))
+        style.theme_use("default")
+        style.configure("TNotebook",
+                        background="#0f172a", borderwidth=0)
+        style.configure("TNotebook.Tab",
+                        background="#1e293b", foreground="#94a3b8",
+                        font=("Segoe UI", 9),
+                        padding=[14, 6])
         style.map("TNotebook.Tab",
                   background=[("selected", "#0f172a")],
                   foreground=[("selected", "#f8fafc")])
 
-        self.nb = ttk.Notebook(self.root)
-        self.nb.pack(fill="both", expand=True)
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill="both", expand=True)
 
         tabs = [
-            ("  📊 Dashboard  ",  DashboardTab),
-            ("  🤖 Auto-Fetch  ",  AutoTab),
-            ("  👤 Leaders    ",  LeadersTab),
-            ("  📋 Reports    ",  ReportsTab),
-            ("  👥 Users      ",  UsersTab),
-            ("  📰 Scraper    ",  ScraperTab),
-            ("  ⚙️ Settings   ",  SettingsTab),
+            ("\ud83d\udcca Dashboard",       self._tab_dashboard),
+            ("\ud83e\udd16 Auto-Fetch",      self._tab_autofetch),
+            ("\ud83d\udd04 Update Leaders",   self._tab_leaders_update),
+            ("\ud83d\udc64 Leaders",          self._tab_leaders),
+            ("\ud83d\udccb Reports",          self._tab_reports),
+            ("\ud83d\udc65 Users",            self._tab_users),
+            ("\u2699\ufe0f Settings",         self._tab_settings),
         ]
-        self.tab_instances = []
-        for label, TabClass in tabs:
-            frame = ttk.Frame(self.nb)
-            self.nb.add(frame, text=label)
-            instance = TabClass(frame, self.db, self._set_status)
-            self.tab_instances.append(instance)
 
-    def _set_status(self, msg, color="#94a3b8"):
-        self._statusbar.config(text=msg, fg=color)
+        for title, builder in tabs:
+            frame = tk.Frame(nb, bg="#0f172a")
+            nb.add(frame, text=title)
+            try:
+                builder(frame)
+            except Exception as e:
+                tk.Label(frame,
+                         text=f"Error loading tab:\n{e}",
+                         font=("Segoe UI", 10),
+                         bg="#0f172a", fg="#ef4444",
+                         justify="left").pack(padx=24, pady=24)
 
-    def _refresh(self):
-        idx = self.nb.index(self.nb.select())
-        if hasattr(self.tab_instances[idx], "load"):
-            self.tab_instances[idx].load()
-        self._set_status("Refreshed.", "#22c55e")
+    # ------------------------------------------------------------------ #
+    def _status_bar(self):
+        bar = tk.Frame(self.root, bg="#020617", height=24)
+        bar.pack(fill="x", side="bottom")
+        bar.pack_propagate(False)
+        tk.Label(bar, textvariable=self._status_var,
+                 font=("Consolas", 8),
+                 bg="#020617", fg="#475569").pack(side="left", padx=8)
 
-    def _quit(self):
-        self.db.close()
-        self.root.quit()
-        self.root.destroy()
+    def set_status(self, msg: str, color: str = "#64748b"):
+        self._status_var.set(msg)
+        # update topbar label color dynamically
+        for w in self.root.winfo_children():
+            if isinstance(w, tk.Frame) and w.cget("bg") == "#1e293b":
+                for lbl in w.winfo_children():
+                    if isinstance(lbl, tk.Label) and \
+                       lbl.cget("textvariable") == str(self._status_var):
+                        lbl.config(fg=color)
+
+    # ------------------------------------------------------------------ #
+    #  Tab builders
+    # ------------------------------------------------------------------ #
+
+    def _tab_dashboard(self, frame):
+        from ui.tabs.dashboard_tab import DashboardTab
+        DashboardTab(frame, self.db, self.set_status)
+
+    def _tab_autofetch(self, frame):
+        try:
+            from ui.tabs.auto_tab import AutoTab
+            AutoTab(frame, self.db, self.set_status)
+        except ImportError:
+            self._placeholder(frame, "\ud83e\udd16 Auto-Fetch", "auto_tab.py")
+
+    def _tab_leaders_update(self, frame):
+        from ui.tabs.leaders_update_tab import LeadersUpdateTab
+        LeadersUpdateTab(frame, self.db, self.set_status)
+
+    def _tab_leaders(self, frame):
+        try:
+            from ui.tabs.leaders_tab import LeadersTab
+            LeadersTab(frame, self.db, self.set_status)
+        except ImportError:
+            self._placeholder(frame, "\ud83d\udc64 Leaders", "leaders_tab.py")
+
+    def _tab_reports(self, frame):
+        try:
+            from ui.tabs.reports_tab import ReportsTab
+            ReportsTab(frame, self.db, self.set_status)
+        except ImportError:
+            self._placeholder(frame, "\ud83d\udccb Reports", "reports_tab.py")
+
+    def _tab_users(self, frame):
+        try:
+            from ui.tabs.users_tab import UsersTab
+            UsersTab(frame, self.db, self.set_status)
+        except ImportError:
+            self._placeholder(frame, "\ud83d\udc65 Users", "users_tab.py")
+
+    def _tab_settings(self, frame):
+        from ui.tabs.settings_tab import SettingsTab
+        SettingsTab(frame, self.db, self.set_status)
+
+    def _placeholder(self, frame, title, filename):
+        tk.Label(frame,
+                 text=f"{title}\n\nComing soon — add {filename} to ui/tabs/",
+                 font=("Segoe UI", 11),
+                 bg="#0f172a", fg="#475569",
+                 justify="center").pack(expand=True)
