@@ -1,14 +1,9 @@
-# NetaTrack India — Python Admin App
-# No C++ / No Visual Studio / No gcc needed
-# Install: pip install -r requirements.txt
+# NetaTrack India — Python Admin requirements
+# MySQL driver removed — now uses HTTP API only
 
-mysql-connector-python>=8.3.0
-requests>=2.31.0
-Pillow>=10.0.0
-transformers>=4.40.0
-# CPU-only PyTorch (no CUDA, no GPU, no C++ build tools)
-# Install separately (pip install -r does not support --index-url):
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
-#
-# OR use onnxruntime instead of torch (even smaller, ~15MB):
-#   pip install onnxruntime
+requests>=2.31.0          # HTTP API calls (replaces mysql-connector-python)
+python-dotenv>=1.0.0      # Load .env config
+rich>=13.7.0              # Terminal UI (tables, progress, colors)
+click>=8.1.7              # CLI commands
+schedule>=1.2.1           # Cron-like job scheduler
+google-generativeai>=0.5.0  # Gemini AI for auto-scoring

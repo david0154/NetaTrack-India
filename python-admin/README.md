@@ -1,45 +1,60 @@
-# NetaTrack India — Python Desktop Admin App
+# NetaTrack India — Python Admin
 
-A lightweight **Tkinter** desktop admin panel that connects directly to your NetaTrack India MySQL database. Manage leaders, approve reports, manage users, edit settings, and trigger the AI scraper — all from your PC.
+Desktop automation tool for managing NetaTrack India data.
+**No MySQL required** — communicates via the PHP REST API.
 
-## Requirements
-
-- Python 3.10+
-- MySQL/MariaDB running (local or remote)
-
-## Install & Run
+## Setup
 
 ```bash
 cd python-admin
 pip install -r requirements.txt
-python main.py
+cp .env.example .env
+# Edit .env with your site URL and API key
 ```
 
-## Tabs
+## Configuration
 
-| Tab | Features |
-|-----|----------|
-| 📊 Dashboard | 6 live stat cards, pending reports list, top leaders table |
-| 👤 Leaders | Search, add, edit (with score sliders), delete leaders |
-| 📋 Reports | Filter by status, approve/reject with one click |
-| 👥 Users | Search, ban/unban, change role (user/moderator/admin) |
-| 🤖 Scraper | Trigger scraper via HTTP, live log view, recent jobs table |
-| ⚙️ Settings | Edit all site settings (name, logo, analytics, ads, SMTP, AI keys) |
+Set these in `python-admin/.env`:
 
-## Connection
+| Variable | Description |
+|---|---|
+| `API_BASE_URL` | Your site URL e.g. `https://netatrack.in` |
+| `API_KEY` | Generate in Admin Panel → Settings → API Keys |
+| `GEMINI_API_KEY` | For AI auto-scoring |
+| `SARVAM_API_KEY` | For Hindi language processing |
 
-On launch, enter your MySQL credentials. Or set env vars to pre-fill:
+## Usage
 
-```bash
-export DB_HOST=127.0.0.1
-export DB_PORT=3306
-export DB_NAME=netatrack
-export DB_USER=root
-python main.py
+```python
+from db.api_client import NetaTrackAPI
+
+api = NetaTrackAPI()  # reads from .env automatically
+
+# List all leaders
+leaders = api.leaders.list()
+
+# Create a leader
+api.leaders.create({
+    'name': 'Narendra Modi',
+    'party_id': 1,
+    'state_id': 7,
+    'role': 'Prime Minister of India'
+})
+
+# Update a leader score
+api.leaders.update(1, {'total_score': 75})
+
+# Get pending submissions
+submissions = api.submissions.list(status='pending')
+
+# Approve a submission
+api.submissions.update(42, {'status': 'approved'})
 ```
 
-## Notes
+## Why API instead of direct MySQL?
 
-- Works on Windows, Linux, macOS
-- No internet required — connects directly to MySQL
-- Scraper tab triggers the PHP scraper via HTTP POST (requires site to be running)
+- Works on **any hosting** — shared hosting, VPS, Vercel, Render, etc.
+- No need to open MySQL TCP port (security risk)
+- No `mysql-connector-python` install issues
+- PHP handles all DB logic; Python is just an API consumer
+- Can run the Python admin from **any machine** — your laptop, GitHub Actions, etc.
