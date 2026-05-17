@@ -1,51 +1,44 @@
 <?php
 namespace NetaTrack\Models;
 
-use NetaTrack\Core\Model;
+use NetaTrack\Core\Database;
 
-/**
- * NetaTrack India - Site Settings Model
- */
-class Setting extends Model
+class Setting
 {
-    protected string $table = 'settings';
-    protected array $fillable = ['key','value','group','type','label','updated_at'];
-    private array $cache = [];
+    private \PDO $db;
+    private static array $cache = [];
+
+    public function __construct()
+    {
+        $this->db = Database::getInstance()->getConnection();
+    }
 
     public function get(string $key, mixed $default = null): mixed
     {
-        if (isset($this->cache[$key])) return $this->cache[$key];
-        $row = $this->findBy('key', $key);
-        $val = $row ? $row['value'] : $default;
-        $this->cache[$key] = $val;
-        return $val;
+        if (isset(self::$cache[$key])) return self::$cache[$key];
+        $stmt = $this->db->prepare("SELECT value FROM settings WHERE `key`=:k LIMIT 1");
+        $stmt->execute([':k'=>$key]);
+        $val = $stmt->fetchColumn();
+        self::$cache[$key] = ($val !== false) ? $val : $default;
+        return self::$cache[$key];
     }
 
     public function set(string $key, mixed $value): void
     {
-        $existing = $this->findBy('key', $key);
-        if ($existing) {
-            $this->db->query('UPDATE settings SET value=?, updated_at=? WHERE key=?',
-                [(string)$value, date('Y-m-d H:i:s'), $key]);
-        } else {
-            $this->db->insert('settings', [
-                'key'   => $key, 'value' => (string)$value,
-                'group' => 'general', 'type' => 'text',
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
-        }
-        $this->cache[$key] = $value;
+        $this->db->prepare(
+            "INSERT INTO settings (`key`,`value`) VALUES (:k,:v)
+             ON DUPLICATE KEY UPDATE `value`=:v2"
+        )->execute([':k'=>$key,':v'=>$value,':v2'=>$value]);
+        self::$cache[$key] = $value;
     }
 
-    public function getGroup(string $group): array
+    public function all(): array
     {
-        $rows = $this->db->fetchAll('SELECT * FROM settings WHERE `group`=?', [$group]);
-        $result = [];
-        foreach ($rows as $r) $result[$r['key']] = $r['value'];
-        return $result;
+        return $this->db->query("SELECT `key`,`value` FROM settings ORDER BY `key`")
+                        ->fetchAll(\PDO::FETCH_KEY_PAIR);
     }
 
-    public function setMany(array $data): void
+    public function bulkSet(array $data): void
     {
         foreach ($data as $k => $v) $this->set($k, $v);
     }
