@@ -1,299 +1,280 @@
 <?php
 /**
- * NetaTrack India — One-Click Web Installer
+ * NetaTrack India — Web Installer
+ * Visit: https://yoursite.com/install.php
+ * Deletes itself after successful install.
  */
 
-define('BASE_PATH', dirname(__DIR__));
-
-if (file_exists(BASE_PATH . '/.installed')) {
-    die('<div style="font-family:sans-serif;text-align:center;padding:3rem;background:#0f172a;color:#e2e8f0;min-height:100vh"><h2 style="color:#22c55e">✅ NetaTrack India is already installed!</h2><p style="color:#94a3b8;margin-top:.75rem">Delete <code>.installed</code> to re-run the installer.</p><a href="/" style="color:#3b82f6">Go to Site &rarr;</a></div>');
-}
-
-session_start();
-$step   = max(1, min(6, (int)($_GET['step'] ?? 1)));
-$errors = [];
+define('NT_INSTALL', true);
+$step    = (int)($_GET['step'] ?? 1);
+$error   = '';
 $success = '';
+$baseDir = dirname(__DIR__);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if ($step === 2) {
-        $_SESSION['db'] = [
-            'host' => trim($_POST['db_host'] ?? '127.0.0.1'),
-            'port' => trim($_POST['db_port'] ?? '3306'),
-            'name' => trim($_POST['db_name'] ?? 'netatrack'),
-            'user' => trim($_POST['db_user'] ?? ''),
-            'pass' => $_POST['db_pass'] ?? '',
-        ];
+// ---- Helper functions -------------------------------------------
+function req_check(string $ext, string $label): array {
+    $ok = extension_loaded($ext);
+    return ['label'=>$label,'ok'=>$ok,'status'=>$ok?'✓':'✗'];
+}
+function php_ver_ok(): bool { return version_compare(PHP_VERSION,'8.1','>='); }
+function write_env(array $d, string $path): void {
+    $lines = [];
+    foreach ($d as $k=>$v) $lines[] = "$k=" . addslashes($v);
+    file_put_contents($path, implode("\n",$lines)."\n");
+}
+function gen_token(int $len=48): string {
+    return bin2hex(random_bytes($len/2));
+}
+
+// ---- Step 2: Process DB form ------------------------------------
+if ($step===2 && $_SERVER['REQUEST_METHOD']==='POST') {
+    $host = trim($_POST['db_host'] ?? '127.0.0.1');
+    $port = (int)trim($_POST['db_port'] ?? 3306);
+    $name = trim($_POST['db_name'] ?? '');
+    $user = trim($_POST['db_user'] ?? '');
+    $pass = trim($_POST['db_pass'] ?? '');
+    $site = rtrim(trim($_POST['site_url'] ?? ''),'/') ?: (isset($_SERVER['HTTPS'])?'https':'http').'://'.$_SERVER['HTTP_HOST'];
+    $admin_email = trim($_POST['admin_email'] ?? 'admin@example.com');
+    $admin_pass  = trim($_POST['admin_pass']  ?? 'admin123');
+
+    if (!$name || !$user) {
+        $error = 'Database name and username are required.';
+    } else {
         try {
-            $dsn = "mysql:host={$_SESSION['db']['host']};port={$_SESSION['db']['port']};charset=utf8mb4";
-            $pdo = new PDO($dsn, $_SESSION['db']['user'], $_SESSION['db']['pass'], [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
-            $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$_SESSION['db']['name']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-            $pdo->exec("USE `{$_SESSION['db']['name']}`");
-            header('Location: install.php?step=3'); exit;
-        } catch (PDOException $e) {
-            $errors[] = 'Database connection failed: ' . $e->getMessage();
-        }
-    }
-
-    if ($step === 3) {
-        $_SESSION['app'] = [
-            'name'              => trim($_POST['site_name'] ?? 'NetaTrack India'),
-            'url'               => rtrim(trim($_POST['site_url'] ?? ''), '/'),
-            'timezone'          => $_POST['timezone'] ?? 'Asia/Kolkata',
-            'site_tagline'      => trim($_POST['site_tagline'] ?? ''),
-            'meta_description'  => trim($_POST['meta_description'] ?? ''),
-            'logo_url'          => trim($_POST['logo_url'] ?? ''),
-            'gemini_key'        => trim($_POST['gemini_key'] ?? ''),
-            'sarvam_key'        => trim($_POST['sarvam_key'] ?? ''),
-        ];
-        if (empty($_SESSION['app']['url'])) $errors[] = 'Site URL is required.';
-        if (empty($errors)) { header('Location: install.php?step=4'); exit; }
-    }
-
-    if ($step === 4) {
-        $_SESSION['site_features'] = [
-            'google_analytics_id' => trim($_POST['google_analytics_id'] ?? ''),
-            'google_adsense_code' => trim($_POST['google_adsense_code'] ?? ''),
-            'sponsor_title'       => trim($_POST['sponsor_title'] ?? ''),
-            'sponsor_html'        => trim($_POST['sponsor_html'] ?? ''),
-            'announcement_text'   => trim($_POST['announcement_text'] ?? ''),
-            'announcement_link'   => trim($_POST['announcement_link'] ?? ''),
-            'announcement_active' => !empty($_POST['announcement_active']) ? '1' : '0',
-        ];
-        header('Location: install.php?step=5'); exit;
-    }
-
-    if ($step === 5) {
-        $name    = trim($_POST['admin_name'] ?? '');
-        $email   = trim($_POST['admin_email'] ?? '');
-        $pass    = $_POST['admin_pass'] ?? '';
-        $confirm = $_POST['admin_pass2'] ?? '';
-        if (strlen($name) < 2) $errors[] = 'Admin name too short.';
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Invalid email.';
-        if (strlen($pass) < 8) $errors[] = 'Password must be at least 8 characters.';
-        if ($pass !== $confirm) $errors[] = 'Passwords do not match.';
-        if (empty($errors)) {
-            $_SESSION['admin'] = ['name'=>$name,'email'=>$email,'pass'=>$pass];
-            header('Location: install.php?step=6'); exit;
-        }
-    }
-
-    if ($step === 6) {
-        try {
-            $db   = $_SESSION['db'];
-            $app  = $_SESSION['app'];
-            $feat = $_SESSION['site_features'] ?? [];
-            $adm  = $_SESSION['admin'];
-
-            $dsn = "mysql:host={$db['host']};port={$db['port']};dbname={$db['name']};charset=utf8mb4";
-            $pdo = new PDO($dsn, $db['user'], $db['pass'], [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
+            $pdo = new PDO("mysql:host=$host;port=$port;charset=utf8mb4", $user, $pass, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
             ]);
+            // Create DB if not exists
+            $pdo->exec("CREATE DATABASE IF NOT EXISTS `$name` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            $pdo->exec("USE `$name`");
 
-            $sqlFile = BASE_PATH . '/database/migrations/001_create_core_tables.sql';
-            if (file_exists($sqlFile)) {
-                $sql = file_get_contents($sqlFile);
-                $statements = array_filter(array_map('trim', preg_split('/;\s*$/m', $sql)), fn($s) => $s !== '' && !preg_match('/^\s*--/', $s));
-                $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-                foreach ($statements as $stmt) {
-                    if (trim($stmt)) { try { $pdo->exec($stmt); } catch(PDOException $e) {} }
+            // Run schema
+            $schemaFile = $baseDir.'/../database/schema.sql';
+            if (file_exists($schemaFile)) {
+                $sql = file_get_contents($schemaFile);
+                foreach (array_filter(array_map('trim', explode(';', $sql))) as $stmt) {
+                    if ($stmt) try { $pdo->exec($stmt); } catch(PDOException $e) { /* skip already exists */ }
                 }
-                $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
             }
 
-            $hash = password_hash($adm['pass'], PASSWORD_BCRYPT, ['cost'=>12]);
-            $pdo->prepare(
-                "INSERT INTO users (name,email,password,role,status,created_at,updated_at)
-                 VALUES (:n,:e,:p,'admin','active',NOW(),NOW())
-                 ON DUPLICATE KEY UPDATE password=:p2, name=:n2"
-            )->execute([':n'=>$adm['name'],':e'=>$adm['email'],':p'=>$hash,':p2'=>$hash,':n2'=>$adm['name']]);
-
-            if ($adm['email'] !== 'admin@netatrack.in') {
-                $pdo->prepare("DELETE FROM users WHERE email='admin@netatrack.in' AND name='NetaTrack Admin'")->execute();
+            // Run seed
+            $seedFile = $baseDir.'/../database/seed_states_leaders.sql';
+            if (file_exists($seedFile)) {
+                $sql = file_get_contents($seedFile);
+                foreach (array_filter(array_map('trim', explode(';', $sql))) as $stmt) {
+                    if ($stmt && !str_starts_with($stmt,'--'))
+                        try { $pdo->exec($stmt); } catch(PDOException $e) { /* skip duplicates */ }
+                }
             }
 
-            $settings = [
-                'site_name'             => $app['name'],
-                'site_url'              => $app['url'],
-                'site_tagline'          => $app['site_tagline'],
-                'meta_description'      => $app['meta_description'],
-                'site_logo'             => $app['logo_url'],
-                'gemini_api_key'        => $app['gemini_key'],
-                'sarvam_api_key'        => $app['sarvam_key'],
-                'ai_enabled'            => !empty($app['gemini_key']) ? '1' : '0',
-                'google_analytics_id'   => $feat['google_analytics_id'] ?? '',
-                'google_adsense_code'   => $feat['google_adsense_code'] ?? '',
-                'sponsor_title'         => $feat['sponsor_title'] ?? '',
-                'sponsor_html'          => $feat['sponsor_html'] ?? '',
-                'announcement_text'     => $feat['announcement_text'] ?? '',
-                'announcement_link'     => $feat['announcement_link'] ?? '',
-                'announcement_active'   => $feat['announcement_active'] ?? '0',
+            // Generate token + write .env
+            $token = gen_token();
+            write_env([
+                'APP_NAME'         => 'NetaTrack India',
+                'APP_URL'          => $site,
+                'APP_ENV'          => 'production',
+                'DB_HOST'          => $host,
+                'DB_PORT'          => $port,
+                'DB_NAME'          => $name,
+                'DB_USER'          => $user,
+                'DB_PASS'          => $pass,
+                'ADMIN_API_TOKEN'  => $token,
+                'ADMIN_EMAIL'      => $admin_email,
+            ], $baseDir.'/.env');
+
+            // Insert default settings into DB
+            $defaults = [
+                ['admin_api_token', $token],
+                ['site_url',        $site],
+                ['site_name',       'NetaTrack India'],
+                ['gemini_key',      ''],
+                ['openai_key',      ''],
+                ['openrouter_key',  ''],
+                ['claude_key',      ''],
+                ['sarvam_key',      ''],
             ];
-            foreach ($settings as $k => $v) {
-                $pdo->prepare("INSERT INTO settings (`key`,`value`) VALUES (:k,:v) ON DUPLICATE KEY UPDATE `value`=:v2")
-                    ->execute([':k'=>$k,':v'=>$v,':v2'=>$v]);
+            $ins = $pdo->prepare("INSERT IGNORE INTO settings (key_name, value) VALUES (?,?)");
+            foreach ($defaults as [$k,$v]) {
+                try { $ins->execute([$k,$v]); } catch(PDOException $e){}
             }
 
-            $appKey = bin2hex(random_bytes(16));
-            $envContent = "APP_NAME=\"{$app['name']}\"
-APP_URL={$app['url']}
-APP_ENV=production
-APP_DEBUG=false
-APP_TIMEZONE={$app['timezone']}
-APP_KEY={$appKey}
+            // Create admin user
+            $hashed = password_hash($admin_pass, PASSWORD_BCRYPT);
+            try {
+                $pdo->prepare("INSERT IGNORE INTO users (name,email,password,role,status) VALUES (?,?,?,'admin','active')")
+                    ->execute(['Admin', $admin_email, $hashed]);
+            } catch(PDOException $e){}
 
-DB_HOST={$db['host']}
-DB_PORT={$db['port']}
-DB_NAME={$db['name']}
-DB_USER={$db['user']}
-DB_PASS={$db['pass']}
-
-GEMINI_API_KEY={$app['gemini_key']}
-SARVAM_API_KEY={$app['sarvam_key']}
-
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-SESSION_LIFETIME=120
-SESSION_SECURE=false
-";
-            file_put_contents(BASE_PATH . '/.env', $envContent);
-            file_put_contents(BASE_PATH . '/.installed', date('Y-m-d H:i:s') . ' | ' . $app['url']);
-            session_destroy();
-            $success = $app['url'];
-        } catch (Throwable $e) {
-            $errors[] = 'Installation failed: ' . $e->getMessage();
+            $step    = 3;
+            $success = $token;
+        } catch(PDOException $e) {
+            $error = 'DB Error: ' . $e->getMessage();
         }
     }
 }
 
-function checkRequirements(): array {
-    return [
-        ['PHP >= 8.1', version_compare(PHP_VERSION,'8.1','>=')],
-        ['PDO Extension', extension_loaded('pdo')],
-        ['PDO MySQL', extension_loaded('pdo_mysql')],
-        ['cURL', extension_loaded('curl')],
-        ['SimpleXML', extension_loaded('simplexml')],
-        ['OpenSSL', extension_loaded('openssl')],
-        ['Writable: /', is_writable(BASE_PATH)],
-        ['Writable: /public', is_writable(BASE_PATH.'/public')],
-    ];
-}
+// ---- Requirements check -----------------------------------------
+$reqs = [
+    ['PHP 8.1+',       php_ver_ok(), PHP_VERSION],
+    ['PDO',            extension_loaded('pdo'),        'required'],
+    ['PDO MySQL',      extension_loaded('pdo_mysql'),  'required'],
+    ['cURL',           extension_loaded('curl'),       'recommended'],
+    ['JSON',           extension_loaded('json'),       'required'],
+    ['mbstring',       extension_loaded('mbstring'),   'recommended'],
+    ['OpenSSL',        extension_loaded('openssl'),    'recommended'],
+    ['.env writable',  is_writable($baseDir) || is_writable($baseDir.'/.env'), 'needed for .env'],
+];
+$allOk = array_reduce($reqs, fn($c,$r)=>$c&&($r[1]||$r[2]==='recommended'), true);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Install NetaTrack India</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/install.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetaTrack India — Installer</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="stylesheet" href="assets/css/installer.css">
 </head>
 <body>
-<div class="install-wrapper">
-    <div class="install-header">
-        <div class="brand">🇮🇳 <span>NetaTrack India</span></div>
-        <p class="brand-sub">Web Installer</p>
+<div class="india-stripe"></div>
+<div class="installer-wrap">
+<div class="installer-box">
+
+  <!-- Header -->
+  <div class="installer-header">
+    <img src="../logo.png" alt="NetaTrack" onerror="this.style.display='none'">
+    <h1>🇮🇳 NetaTrack India</h1>
+    <p>Web Installer — sets up your database, seeds all states &amp; leaders</p>
+  </div>
+
+  <!-- Step indicator -->
+  <div style="padding:0 36px;margin-top:24px">
+    <div class="install-steps">
+      <?php foreach(['Requirements','Database','Complete'] as $i=>$s): ?>
+      <div class="install-step <?= $step===$i+1?'active':($step>$i+1?'done':'') ?>">
+        <span class="step-num"><?= $step>$i+1?'✓':$i+1 ?></span>
+        <?= $s ?>
+      </div>
+      <?php endforeach ?>
+    </div>
+  </div>
+
+  <div class="installer-body">
+
+  <?php if($step===1): /* ---- STEP 1: Requirements ------------- */ ?>
+    <h3 style="margin-bottom:16px">System Requirements</h3>
+    <?php foreach($reqs as [$label,$ok,$note]): ?>
+    <div class="req-item">
+      <span class="req-label"><?= htmlspecialchars($label) ?>
+        <span class="text-muted text-xs">(<?= htmlspecialchars($note) ?>)</span>
+      </span>
+      <span class="<?= $ok?'req-ok':'req-'.($note==='recommended'?'warn':'fail') ?>">
+        <?= $ok?'✓ OK':($note==='recommended'?'⚠ Missing':'✗ Required') ?>
+      </span>
+    </div>
+    <?php endforeach ?>
+
+    <div style="margin-top:24px">
+      <?php if($allOk): ?>
+      <a href="?step=2" class="btn btn-primary btn-lg btn-block">Continue →</a>
+      <?php else: ?>
+      <div class="alert alert-error">Fix the required items above before continuing.</div>
+      <a href="?step=1" class="btn btn-ghost btn-block">Re-check</a>
+      <?php endif ?>
     </div>
 
-    <div class="steps-bar">
-        <?php $stepLabels = ['Welcome','Database','Site','Integrations','Admin','Install'];
-        for ($i = 1; $i <= 6; $i++): $cls = $i < $step ? 'done' : ($i == $step ? 'active' : ''); ?>
-        <div class="step-item <?= $cls ?>"><div class="step-circle"><?= $i < $step ? '✓' : $i ?></div><div class="step-label"><?= $stepLabels[$i-1] ?></div></div>
-        <?php if ($i < 6): ?><div class="step-line <?= $i < $step ? 'done' : '' ?>"></div><?php endif; ?>
-        <?php endfor; ?>
+  <?php elseif($step===2): /* ---- STEP 2: DB form -------------- */ ?>
+    <h3 style="margin-bottom:4px">Database Configuration</h3>
+    <p class="text-muted text-sm" style="margin-bottom:20px">Get these details from your hosting cPanel → MySQL Databases</p>
+
+    <?php if($error): ?>
+    <div class="alert alert-error"><?= htmlspecialchars($error) ?></div>
+    <?php endif ?>
+
+    <form method="POST" action="?step=2">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">DB Host</label>
+          <input class="form-control" name="db_host" value="localhost" placeholder="localhost">
+          <span class="form-hint">Usually 'localhost' on shared hosting</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">DB Port</label>
+          <input class="form-control" name="db_port" value="3306" placeholder="3306">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Database Name</label>
+        <input class="form-control" name="db_name" placeholder="u123456789_netatrack" required>
+        <span class="form-hint">Create this DB in cPanel → MySQL Databases first</span>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">DB Username</label>
+          <input class="form-control" name="db_user" placeholder="u123456789_admin" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">DB Password</label>
+          <input class="form-control" type="password" name="db_pass" placeholder="••••••••">
+        </div>
+      </div>
+      <hr style="border-color:var(--border);margin:16px 0">
+      <div class="form-group">
+        <label class="form-label">Site URL</label>
+        <input class="form-control" name="site_url" value="<?= htmlspecialchars('https://'.$_SERVER['HTTP_HOST']) ?>">
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Admin Email</label>
+          <input class="form-control" type="email" name="admin_email" value="admin@example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Admin Password</label>
+          <input class="form-control" type="password" name="admin_pass" value="admin123">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg btn-block" style="margin-top:8px">
+        🚀 Install NetaTrack India
+      </button>
+    </form>
+
+  <?php elseif($step===3): /* ---- STEP 3: Complete ------------- */ ?>
+    <div style="text-align:center;padding:16px 0">
+      <div style="font-size:3rem;margin-bottom:12px">🎉</div>
+      <h2 style="margin-bottom:8px">Installation Complete!</h2>
+      <p>NetaTrack India is ready. All states, UTs, and 45 current leaders have been seeded.</p>
+    </div>
+    <div class="alert alert-success" style="margin:16px 0">
+      ✓ Database created &amp; schema imported<br>
+      ✓ 28 States + 8 UTs seeded<br>
+      ✓ 45 current Indian leaders seeded<br>
+      ✓ Admin account created<br>
+      ✓ .env file written
+    </div>
+    <div style="margin-bottom:16px">
+      <div class="form-label">Your Admin API Token (save this for Python app):</div>
+      <div class="token-display">
+        <span id="api-token"><?= htmlspecialchars($success) ?></span>
+        <button class="copy-btn" onclick="copyText('<?= htmlspecialchars($success) ?>','Token')">Copy</button>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:16px">
+      <a href="../admin" class="btn btn-primary btn-lg">🏛 Go to Admin Panel</a>
+      <a href="../" class="btn btn-ghost btn-lg">🌐 View Website</a>
+    </div>
+    <div class="alert alert-warning" style="margin-top:16px">
+      ⚠️ <strong>Delete this file after installation:</strong><br>
+      <code>php/public/install.php</code>
     </div>
 
-    <div class="install-card">
-        <?php if (!empty($errors)): ?><div class="alert alert-error"><?php foreach ($errors as $e): ?><p>❌ <?= htmlspecialchars($e) ?></p><?php endforeach; ?></div><?php endif; ?>
-        <?php if ($success): ?>
-        <div class="success-screen">
-            <div class="success-icon">🎉</div>
-            <h2>Installation Complete!</h2>
-            <p>Your site, admin account, integrations, and announcements are ready.</p>
-            <div class="success-links">
-                <a href="<?= htmlspecialchars($success) ?>" class="btn btn-primary">🌐 Visit Site</a>
-                <a href="<?= htmlspecialchars($success) ?>/admin/auth/login" class="btn btn-orange">🛡️ Admin Panel</a>
-            </div>
-            <div class="security-note">⚠️ <strong>Security:</strong> Installer locked. Delete <code>public/install.php</code> for extra safety.</div>
-        </div>
-        <?php elseif ($step === 1): ?>
-        <h2 class="step-title">👋 Welcome to NetaTrack India</h2>
-        <p class="step-desc">This wizard sets up your site, database, branding, analytics, ads, sponsor block, announcements, and admin account.</p>
-        <div class="req-list">
-            <?php $allOk = true; foreach (checkRequirements() as [$label, $ok]): if (!$ok) $allOk = false; ?>
-            <div class="req-item"><span class="req-icon"><?= $ok ? '✅' : '❌' ?></span><span class="req-label"><?= htmlspecialchars($label) ?></span><span class="req-status <?= $ok ? 'ok' : 'fail' ?>"><?= $ok ? 'OK' : 'MISSING' ?></span></div>
-            <?php endforeach; ?>
-        </div>
-        <?php if ($allOk): ?><a href="install.php?step=2" class="btn btn-primary btn-full">→ Continue to Database Setup</a><?php else: ?><div class="alert alert-warn">⚠️ Please fix the missing requirements before continuing.</div><?php endif; ?>
+  <?php endif ?>
+  </div>
 
-        <?php elseif ($step === 2): ?>
-        <h2 class="step-title">🗄️ Database Configuration</h2>
-        <p class="step-desc">Enter MySQL/MariaDB details. Database will be created automatically if missing.</p>
-        <form method="POST" action="install.php?step=2">
-            <div class="form-group"><label>Host</label><input type="text" name="db_host" value="<?= htmlspecialchars($_SESSION['db']['host'] ?? '127.0.0.1') ?>"></div>
-            <div class="form-group"><label>Port</label><input type="number" name="db_port" value="<?= htmlspecialchars($_SESSION['db']['port'] ?? '3306') ?>"></div>
-            <div class="form-group"><label>Database Name</label><input type="text" name="db_name" value="<?= htmlspecialchars($_SESSION['db']['name'] ?? 'netatrack') ?>"></div>
-            <div class="form-group"><label>Username</label><input type="text" name="db_user" value="<?= htmlspecialchars($_SESSION['db']['user'] ?? 'root') ?>" autofocus></div>
-            <div class="form-group"><label>Password</label><input type="password" name="db_pass"></div>
-            <div class="form-actions"><a href="install.php?step=1" class="btn btn-secondary">← Back</a><button type="submit" class="btn btn-primary">Test & Continue →</button></div>
-        </form>
-
-        <?php elseif ($step === 3): ?>
-        <h2 class="step-title">🌐 Site Branding & AI</h2>
-        <p class="step-desc">Set the site name, logo URL, description, timezone, and optional AI API keys.</p>
-        <form method="POST" action="install.php?step=3">
-            <div class="form-group"><label>Site Name</label><input type="text" name="site_name" value="<?= htmlspecialchars($_SESSION['app']['name'] ?? 'NetaTrack India') ?>"></div>
-            <div class="form-group"><label>Site URL</label><input type="url" name="site_url" value="<?= htmlspecialchars($_SESSION['app']['url'] ?? ('http://'.$_SERVER['HTTP_HOST'])) ?>" required></div>
-            <div class="form-group"><label>Tagline</label><input type="text" name="site_tagline" value="<?= htmlspecialchars($_SESSION['app']['site_tagline'] ?? '') ?>" placeholder="Track promises. Expose corruption."></div>
-            <div class="form-group"><label>Meta Description</label><input type="text" name="meta_description" value="<?= htmlspecialchars($_SESSION['app']['meta_description'] ?? '') ?>" placeholder="Political accountability platform for India"></div>
-            <div class="form-group"><label>Logo URL</label><input type="url" name="logo_url" value="<?= htmlspecialchars($_SESSION['app']['logo_url'] ?? '') ?>" placeholder="https://yourdomain.com/logo.png"></div>
-            <div class="form-group"><label>Timezone</label><select name="timezone"><?php foreach (['Asia/Kolkata','UTC','Asia/Dubai','Asia/Singapore','Europe/London','America/New_York'] as $z): ?><option value="<?= $z ?>" <?= ($_SESSION['app']['timezone'] ?? 'Asia/Kolkata') === $z ? 'selected' : '' ?>><?= $z ?></option><?php endforeach; ?></select></div>
-            <hr class="divider">
-            <p class="optional-label">🤖 AI Keys <span class="hint">(optional)</span></p>
-            <div class="form-group"><label>Gemini API Key</label><input type="password" name="gemini_key" value="<?= htmlspecialchars($_SESSION['app']['gemini_key'] ?? '') ?>"></div>
-            <div class="form-group"><label>Sarvam AI Key</label><input type="password" name="sarvam_key" value="<?= htmlspecialchars($_SESSION['app']['sarvam_key'] ?? '') ?>"></div>
-            <div class="form-actions"><a href="install.php?step=2" class="btn btn-secondary">← Back</a><button type="submit" class="btn btn-primary">Continue →</button></div>
-        </form>
-
-        <?php elseif ($step === 4): ?>
-        <h2 class="step-title">📢 Integrations & Widgets</h2>
-        <p class="step-desc">You can configure analytics, ads, sponsor block, and homepage announcements here. These can also be changed later from admin settings.</p>
-        <form method="POST" action="install.php?step=4">
-            <div class="form-group"><label>Google Analytics ID</label><input type="text" name="google_analytics_id" value="<?= htmlspecialchars($_SESSION['site_features']['google_analytics_id'] ?? '') ?>" placeholder="G-XXXXXXXXXX"></div>
-            <div class="form-group"><label>Google AdSense Code / Publisher ID</label><input type="text" name="google_adsense_code" value="<?= htmlspecialchars($_SESSION['site_features']['google_adsense_code'] ?? '') ?>" placeholder="ca-pub-xxxxxxxxxxxxxxxx"></div>
-            <div class="form-group"><label>Sponsor Title</label><input type="text" name="sponsor_title" value="<?= htmlspecialchars($_SESSION['site_features']['sponsor_title'] ?? '') ?>" placeholder="Sponsored By"></div>
-            <div class="form-group"><label>Sponsor HTML / Embed</label><input type="text" name="sponsor_html" value="<?= htmlspecialchars($_SESSION['site_features']['sponsor_html'] ?? '') ?>" placeholder="<a href='...'><img ...></a>"></div>
-            <div class="form-group"><label>Announcement Text</label><input type="text" name="announcement_text" value="<?= htmlspecialchars($_SESSION['site_features']['announcement_text'] ?? '') ?>" placeholder="Breaking: New report published on state leaders"></div>
-            <div class="form-group"><label>Announcement Link</label><input type="url" name="announcement_link" value="<?= htmlspecialchars($_SESSION['site_features']['announcement_link'] ?? '') ?>" placeholder="https://yourdomain.com/reports"></div>
-            <div class="form-group checkbox-row"><label><input type="checkbox" name="announcement_active" value="1" <?= !empty($_SESSION['site_features']['announcement_active']) ? 'checked' : '' ?>> Enable Announcement Bar</label></div>
-            <div class="form-actions"><a href="install.php?step=3" class="btn btn-secondary">← Back</a><button type="submit" class="btn btn-primary">Continue →</button></div>
-        </form>
-
-        <?php elseif ($step === 5): ?>
-        <h2 class="step-title">👤 Create Admin Account</h2>
-        <p class="step-desc">This will be your primary administrator account.</p>
-        <form method="POST" action="install.php?step=5">
-            <div class="form-group"><label>Full Name</label><input type="text" name="admin_name" value="<?= htmlspecialchars($_SESSION['admin']['name'] ?? '') ?>" required autofocus></div>
-            <div class="form-group"><label>Email Address</label><input type="email" name="admin_email" value="<?= htmlspecialchars($_SESSION['admin']['email'] ?? '') ?>" required></div>
-            <div class="form-group"><label>Password</label><input type="password" name="admin_pass" required></div>
-            <div class="form-group"><label>Confirm Password</label><input type="password" name="admin_pass2" required></div>
-            <div class="form-actions"><a href="install.php?step=4" class="btn btn-secondary">← Back</a><button type="submit" class="btn btn-primary">Continue →</button></div>
-        </form>
-
-        <?php elseif ($step === 6): ?>
-        <h2 class="step-title">🚀 Ready to Install</h2>
-        <p class="step-desc">Review your config and finish installation.</p>
-        <div class="review-grid">
-            <div class="review-section"><h4>🗄️ Database</h4><div class="review-row"><span>Host</span><strong><?= htmlspecialchars($_SESSION['db']['host'] ?? '') ?></strong></div><div class="review-row"><span>Database</span><strong><?= htmlspecialchars($_SESSION['db']['name'] ?? '') ?></strong></div><div class="review-row"><span>User</span><strong><?= htmlspecialchars($_SESSION['db']['user'] ?? '') ?></strong></div></div>
-            <div class="review-section"><h4>🌐 Site</h4><div class="review-row"><span>Name</span><strong><?= htmlspecialchars($_SESSION['app']['name'] ?? '') ?></strong></div><div class="review-row"><span>Logo</span><strong><?= !empty($_SESSION['app']['logo_url']) ? 'Set' : 'Not set' ?></strong></div><div class="review-row"><span>Analytics</span><strong><?= !empty($_SESSION['site_features']['google_analytics_id']) ? 'Enabled' : 'Off' ?></strong></div></div>
-            <div class="review-section"><h4>👤 Admin</h4><div class="review-row"><span>Name</span><strong><?= htmlspecialchars($_SESSION['admin']['name'] ?? '') ?></strong></div><div class="review-row"><span>Email</span><strong><?= htmlspecialchars($_SESSION['admin']['email'] ?? '') ?></strong></div><div class="review-row"><span>Announcement</span><strong><?= !empty($_SESSION['site_features']['announcement_active']) ? 'Active' : 'Off' ?></strong></div></div>
-        </div>
-        <form method="POST" action="install.php?step=6"><div class="form-actions"><a href="install.php?step=5" class="btn btn-secondary">← Back</a><button type="submit" class="btn btn-install">🚀 Install NetaTrack India</button></div></form>
-        <?php endif; ?>
-    </div>
-    <p class="install-footer">NetaTrack India — Political Accountability Platform for India</p>
+  <div class="installer-footer">
+    NetaTrack India &mdash; Built by <a href="https://github.com/david0154">David</a>
+  </div>
 </div>
+</div>
+<script src="assets/js/app.js"></script>
 </body>
 </html>
