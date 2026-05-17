@@ -1,14 +1,12 @@
 """
 NetaTrack India — Python Admin App
 Requires: pip install -r requirements.txt
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
 """
 import tkinter as tk
 from tkinter import messagebox
 import os
 import sys
 
-# Make sure python-admin/ is in path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from db.connection import DBConnection
@@ -49,16 +47,16 @@ def load_logo(root: tk.Tk):
 
 
 def check_deps() -> bool:
-    """Check required packages. Show error if missing."""
+    """Check required packages. mysql-connector is NOT needed."""
     missing = []
-    try:
-        import mysql.connector  # noqa
-    except ImportError:
-        missing.append("mysql-connector-python")
     try:
         import requests  # noqa
     except ImportError:
         missing.append("requests")
+    try:
+        import dotenv  # noqa  (python-dotenv)
+    except ImportError:
+        missing.append("python-dotenv")
 
     if missing:
         messagebox.showerror(
@@ -72,7 +70,6 @@ def check_deps() -> bool:
 
 
 def try_load_ai(root: tk.Tk, app: MainWindow):
-    """Try to load AI model in background after window opens."""
     try:
         from auto.model_downloader import ensure_model_with_ui
         from auto.local_ai import set_sentiment_pipe
@@ -80,28 +77,25 @@ def try_load_ai(root: tk.Tk, app: MainWindow):
         def _on_done(pipe):
             if pipe:
                 set_sentiment_pipe(pipe)
-                app.set_status("\ud83e\udd16 AI Ready", "#22c55e")
+                app.set_status("\U0001f916 AI Ready", "#22c55e")
             else:
                 app.set_status("\u26a0\ufe0f AI unavailable — rule-based only", "#f59e0b")
 
         ensure_model_with_ui(root, on_done=_on_done)
     except Exception:
-        # AI module not available — continue without it
         pass
 
 
 def main():
     root = tk.Tk()
-    root.withdraw()  # hide until DB connected
+    root.withdraw()
     root.title("NetaTrack India")
     root.configure(bg="#0f172a")
 
-    # Check basic deps
     if not check_deps():
         root.destroy()
         return
 
-    # Load logo
     logo_img = load_logo(root)
     if logo_img:
         try:
@@ -109,7 +103,7 @@ def main():
         except Exception:
             pass
 
-    # DB connect dialog
+    # Show API connect dialog (NOT MySQL)
     db = DBConnection()
     dialog = ConnectDialog(root, db)
     root.wait_window(dialog.window)
@@ -118,12 +112,8 @@ def main():
         root.destroy()
         return
 
-    # Build main window
     app = MainWindow(root, db, logo_img=logo_img)
-
-    # Load AI model in background (non-blocking)
     root.after(800, lambda: try_load_ai(root, app))
-
     root.mainloop()
 
 
