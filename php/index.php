@@ -1,16 +1,11 @@
 <?php
 /**
- * NetaTrack India - Front Controller
- * All requests are routed through here via .htaccess
+ * NetaTrack India — Redirect helper
+ * If someone accidentally points document root to php/ instead of php/public/,
+ * this redirects them to the correct public index.
+ *
+ * CORRECT document root = php/public/
+ * Upload public/ contents directly to public_html/ on shared hosting.
  */
-
-declare(strict_types=1);
-
-require_once __DIR__ . '/bootstrap.php';
-
-// Load routes
-require ROOT_PATH . '/routes/web.php';
-require ROOT_PATH . '/routes/api.php';
-
-// Dispatch
-NetaTrack\Core\Router::dispatch();
+header('Location: public/index.php', true, 301);
+exit;
