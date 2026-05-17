@@ -7,6 +7,7 @@ from ui.tabs.reports_tab import ReportsTab
 from ui.tabs.users_tab import UsersTab
 from ui.tabs.settings_tab import SettingsTab
 from ui.tabs.scraper_tab import ScraperTab
+from ui.tabs.auto_tab import AutoTab
 
 
 class MainWindow:
@@ -16,7 +17,7 @@ class MainWindow:
         self.root.title("NetaTrack India — Admin")
         self.root.configure(bg="#0f172a")
         self.root.deiconify()
-        self._set_size(1280, 760)
+        self._set_size(1320, 780)
         self.root.protocol("WM_DELETE_WINDOW", self._quit)
         self._build()
 
@@ -26,32 +27,31 @@ class MainWindow:
         self.root.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
 
     def _build(self):
-        # Top bar
         topbar = tk.Frame(self.root, bg="#1e293b", height=50)
         topbar.pack(fill="x")
         topbar.pack_propagate(False)
-        tk.Label(topbar, text="🇮🇳 NetaTrack India Admin", font=("Segoe UI", 13, "bold"),
-                 bg="#1e293b", fg="#f8fafc", padx=16).pack(side="left", pady=12)
+        tk.Label(topbar, text="🇮🇳 NetaTrack India Admin",
+                 font=("Segoe UI", 13, "bold"), bg="#1e293b", fg="#f8fafc", padx=16).pack(side="left", pady=12)
         tk.Button(topbar, text="🔄 Refresh", bg="#0f172a", fg="#94a3b8", relief="flat",
                   font=("Segoe UI", 9), cursor="hand2", command=self._refresh).pack(side="right", padx=8, pady=10)
         tk.Button(topbar, text="🚪 Disconnect", bg="#0f172a", fg="#f87171", relief="flat",
                   font=("Segoe UI", 9), cursor="hand2", command=self._quit).pack(side="right", pady=10)
 
-        # Status bar
-        self._statusbar = tk.Label(self.root, text="🟢 Connected", bg="#0f172a", fg="#22c55e",
+        self._statusbar = tk.Label(self.root, text="🟢 Connected",
+                                   bg="#0f172a", fg="#22c55e",
                                    font=("Segoe UI", 8), anchor="w", padx=10)
         self._statusbar.pack(side="bottom", fill="x")
 
-        # Notebook tabs
         self.nb = ttk.Notebook(self.root)
-        self.nb.pack(fill="both", expand=True, padx=0, pady=0)
+        self.nb.pack(fill="both", expand=True)
 
         self.tabs = [
             ("  📊 Dashboard  ",  DashboardTab),
+            ("  🤖 Auto-Fetch  ",  AutoTab),
             ("  👤 Leaders    ",  LeadersTab),
             ("  📋 Reports    ",  ReportsTab),
             ("  👥 Users      ",  UsersTab),
-            ("  🤖 Scraper    ",  ScraperTab),
+            ("  📰 Scraper    ",  ScraperTab),
             ("  ⚙️ Settings   ",  SettingsTab),
         ]
         self.tab_instances = []
