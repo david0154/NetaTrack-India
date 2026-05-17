@@ -7,3 +7,5 @@ rich>=13.7.0              # Terminal UI (tables, progress, colors)
 click>=8.1.7              # CLI commands
 schedule>=1.2.1           # Cron-like job scheduler
 google-generativeai>=0.5.0  # Gemini AI for auto-scoring
+Pillow>=10.0.0
+transformers>=4.40.0
