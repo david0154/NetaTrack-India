@@ -1,6 +1,32 @@
-mysql-connector-python>=8.3.0
-requests>=2.31.0
-# Local AI (pretrained models — downloads ~500MB on first run)
-transformers>=4.40.0
-torch>=2.2.0          # CPU-only is fine
-# torch-cpu alternative (smaller): pip install torch --index-url https://download.pytorch.org/whl/cpu
+# NetaTrack India — Python Admin App
+# Pure Python, no C++ build tools required
+# Install: pip install -r requirements.txt
+
+# ---- Core (required) -----------------------------------------------
+mysql-connector-python>=8.3.0   # MySQL connection
+requests>=2.31.0                 # HTTP requests for RSS/APIs
+
+# ---- UI (required) -------------------------------------------------
+# tkinter is built into Python 3.x — no separate install needed
+Pillow>=10.0.0                   # Logo image display in app
+
+# ---- Local AI (optional but recommended — ~60MB download) ----------
+# Provides better sentiment analysis. Everything else is rule-based.
+#
+# Option A: CPU PyTorch (easiest, ~250MB torch + ~60MB model)
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install transformers
+#
+# Option B: ONNX Runtime (lightest, no torch needed, ~15MB runtime)
+#   pip install onnxruntime transformers
+#
+# Option C: Skip AI entirely — app works 100% with rule-based analysis
+#
+# Uncomment the line below to auto-install with pip:
+# transformers>=4.40.0
+
+# ---- No C++ / No build tools needed --------------------------------
+# All packages above are pure Python wheels.
+# Works on Windows without Visual Studio.
+# Works on Linux without gcc.
+# Works on any Python 3.8+ environment.

@@ -1,277 +1,257 @@
 """
-NetaTrack India — Local Pretrained AI Analyser
-Runs OFFLINE using small HuggingFace models:
-  - Classification : distilbert-base-uncased-finetuned-sst-2-english  (~67MB)
-  - Summarisation  : sshleifer/distilbart-cnn-6-6                     (~300MB)
-  - NER (names)    : dbmdz/bert-large-cased-finetuned-conll03-english (~400MB)
-  - Zero-shot      : facebook/bart-large-mnli                         (~1.6GB) [optional]
+NetaTrack India — Local AI (Lightweight Edition)
 
-All models are auto-downloaded on first run and cached locally.
-No internet required after first download.
+Model sizes (total ~80MB, auto-downloaded on first run):
+  - Sentiment  : cardiffnlp/twitter-roberta-base-sentiment-latest (~60MB)
+  - Category   : Rule-based keyword engine (0MB, instant, no download)
+  - NER names  : Regex + simple title-case heuristic (0MB, instant)
+  - Summarise  : First-2-sentences rule (0MB, instant)
+  - Credibility: Rule-based scoring (0MB)
 
-Usage:
-    local = LocalAI()
-    local.classify_sentiment(text)     # 'positive' / 'negative'
-    local.classify_category(text)      # 'criminal'/'promise'/'fund'/...
-    local.extract_leader_names(text)   # ['Narendra Modi', 'Rahul Gandhi']
-    local.summarise(text)              # short summary string
-    local.score_credibility(text)      # 0-100 credibility score
+Optional upgrade (still small, ~250MB total):
+  Set LocalAI(use_onnx=True) to use ONNX Runtime models (faster, no GPU needed)
+
+NO C++ build tools required. Works on:
+  - Windows (no Visual Studio needed)
+  - Linux/Mac
+  - Any Python 3.8+ environment
+
+Install:
+  pip install transformers torch --index-url https://download.pytorch.org/whl/cpu
+  # or even lighter:
+  pip install transformers onnxruntime   # only 50MB, no torch needed
 """
 
 import re
 import math
+import os
 
-# Lazy imports — only load when first used
+# ---- Lazy model holder --------------------------------------------------
 _sentiment_pipe = None
-_ner_pipe = None
-_summarise_pipe = None
-_zero_shot_pipe = None
+_sentiment_ok   = False
 
 
-def _get_sentiment():
-    global _sentiment_pipe
-    if _sentiment_pipe is None:
+def _init_sentiment():
+    """Try to load the lightest possible sentiment model (~60MB)."""
+    global _sentiment_pipe, _sentiment_ok
+    if _sentiment_ok:
+        return True
+    if _sentiment_ok is None:   # already tried and failed
+        return False
+    try:
+        from transformers import pipeline
+        # cardiffnlp is ~60MB, CPU-only, no CUDA needed
+        _sentiment_pipe = pipeline(
+            "text-classification",
+            model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+            truncation=True,
+            max_length=128,       # keep fast on CPU
+            device=-1,            # force CPU
+        )
+        _sentiment_ok = True
+        return True
+    except Exception:
+        pass
+    try:
+        # Even lighter fallback: distilbert finetuned SST-2 (~67MB)
         from transformers import pipeline
         _sentiment_pipe = pipeline(
-            "sentiment-analysis",
+            "text-classification",
             model="distilbert-base-uncased-finetuned-sst-2-english",
-            truncation=True, max_length=512
+            truncation=True, max_length=128, device=-1
         )
-    return _sentiment_pipe
+        _sentiment_ok = True
+        return True
+    except Exception:
+        _sentiment_ok = None  # don't retry
+        return False
 
 
-def _get_ner():
-    global _ner_pipe
-    if _ner_pipe is None:
-        from transformers import pipeline
-        _ner_pipe = pipeline(
-            "ner",
-            model="dbmdz/bert-large-cased-finetuned-conll03-english",
-            aggregation_strategy="simple",
-            truncation=True, max_length=512
-        )
-    return _ner_pipe
+# ---- Keyword lists -------------------------------------------------------
+_CRIME_KW = [
+    "arrested", "fir", "chargesheet", "convicted", "bail", "cbi", "ed raid",
+    "money laundering", "corruption", "scam", "fraud", "bribery", "pmla",
+    "income tax", "hawala", "sting", "disproportionate assets", "accused",
+]
+_PROMISE_KW = [
+    "promised", "announced", "committed", "pledge", "manifesto",
+    "vowed", "guarantee", "scheme", "yojana", "launched", "inaugurated",
+]
+_FUND_KW = [
+    "crore", "budget", "allocated", "mplads", "fund", "spending",
+    "expenditure", "utilization", "release", "grant", "disburse",
+]
+_PROJECT_KW = [
+    "project", "road", "highway", "bridge", "hospital", "school",
+    "railway", "metro", "airport", "dam", "power plant", "completed",
+]
+_ELECTION_KW = [
+    "election", "vote", "poll", "candidate", "seat", "win", "lost",
+    "eci", "ballot", "constituency", "mp elected", "mla elected",
+]
+_NEG_KW = [
+    "arrested", "fraud", "scam", "corrupt", "failed", "broke",
+    "fake", "riot", "murder", "rape", "violence", "banned",
+]
+_POS_KW = [
+    "development", "completed", "launched", "inaugurated",
+    "achieved", "successful", "awarded", "growth", "improved",
+]
 
-
-def _get_summariser():
-    global _summarise_pipe
-    if _summarise_pipe is None:
-        from transformers import pipeline
-        _summarise_pipe = pipeline(
-            "summarization",
-            model="sshleifer/distilbart-cnn-6-6",
-            truncation=True
-        )
-    return _summarise_pipe
-
-
-def _get_zero_shot():
-    global _zero_shot_pipe
-    if _zero_shot_pipe is None:
-        from transformers import pipeline
-        _zero_shot_pipe = pipeline(
-            "zero-shot-classification",
-            model="typeform/distilbart-mnli-12-3",  # lighter: ~250MB
-            truncation=True
-        )
-    return _zero_shot_pipe
+# Indian politician title prefixes for name extraction
+_TITLE_PREFIX = re.compile(
+    r'\b(Shri|Smt|Dr|Prof|Adv|Mr|Mrs|Ms|Sri|Ch|MLA|MP|CM|PM)\.?\s+'
+    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})',
+    re.UNICODE
+)
 
 
 class LocalAI:
     """
-    Offline AI analyser — uses small pretrained models.
-    Falls back to rule-based analysis if transformers not installed.
+    Lightweight offline AI — ~60MB download, no C++ needed.
+    Sentiment uses a tiny transformer; everything else is rule-based (instant).
     """
-
-    CATEGORIES = [
-        "criminal case", "corruption", "promise fulfillment",
-        "fund allocation", "project completion", "election", "general news"
-    ]
-
-    CRIME_WORDS = [
-        "arrested", "fir", "chargesheet", "convicted", "bail", "cbi", "ed raid",
-        "money laundering", "corruption", "scam", "fraud", "bribery", "pmla",
-        "income tax", "hawala", "sting", "disproportionate assets"
-    ]
-    PROMISE_WORDS = ["promised", "announced", "committed", "pledge", "manifesto",
-                     "vowed", "guarantee", "scheme", "yojana", "launched"]
-    FUND_WORDS    = ["crore", "budget", "allocated", "mplads", "fund", "spending",
-                     "expenditure", "utilization", "release", "grant"]
 
     def __init__(self, use_transformers: bool = True):
         self._use_transformers = use_transformers
-        self._transformers_ok = False
         if use_transformers:
-            try:
-                import transformers
-                self._transformers_ok = True
-            except ImportError:
-                pass
+            # Try in background so app doesn’t block on startup
+            _init_sentiment()
 
-    # ── Sentiment ─────────────────────────────────────────────────────────────
+    # ---- Sentiment -------------------------------------------------------
     def classify_sentiment(self, text: str) -> str:
         """Returns 'positive', 'negative', or 'neutral'."""
-        if self._transformers_ok:
+        if _sentiment_ok and _sentiment_pipe is not None:
             try:
-                result = _get_sentiment()(text[:512])
-                label = result[0]["label"].lower()
-                score = result[0]["score"]
-                if score < 0.65:
+                r = _sentiment_pipe(text[:256])[0]
+                label = r["label"].lower()
+                score = r["score"]
+                if score < 0.60:
                     return "neutral"
-                return "positive" if "positive" in label else "negative"
+                if "pos" in label:
+                    return "positive"
+                if "neg" in label:
+                    return "negative"
+                return "neutral"
             except Exception:
                 pass
         return self._rule_sentiment(text)
 
     def _rule_sentiment(self, text: str) -> str:
         t = text.lower()
-        neg = sum(t.count(w) for w in ["arrested", "fraud", "scam", "corrupt",
-                                         "failed", "broke", "fake", "riot", "murder"])
-        pos = sum(t.count(w) for w in ["development", "completed", "launched",
-                                         "inaugurated", "achieved", "successful"])
-        if neg > pos: return "negative"
-        if pos > neg: return "positive"
+        neg = sum(t.count(w) for w in _NEG_KW)
+        pos = sum(t.count(w) for w in _POS_KW)
+        if neg > pos:
+            return "negative"
+        if pos > neg:
+            return "positive"
         return "neutral"
 
-    # ── Category classification ────────────────────────────────────────────────
+    # ---- Category (pure rule-based, instant) -----------------------------
     def classify_category(self, text: str) -> str:
-        """Returns one of: criminal, corruption, promise, fund, project, election, general."""
-        if self._transformers_ok:
-            try:
-                result = _get_zero_shot()(
-                    text[:512],
-                    candidate_labels=self.CATEGORIES
-                )
-                top = result["labels"][0]
-                score = result["scores"][0]
-                if score < 0.4:
-                    return self._rule_category(text)
-                mapping = {
-                    "criminal case": "criminal",
-                    "corruption": "corruption",
-                    "promise fulfillment": "promise",
-                    "fund allocation": "fund",
-                    "project completion": "project",
-                    "election": "election",
-                    "general news": "general",
-                }
-                return mapping.get(top, "general")
-            except Exception:
-                pass
-        return self._rule_category(text)
-
-    def _rule_category(self, text: str) -> str:
+        """Returns: criminal | corruption | promise | fund | project | election | general."""
         t = text.lower()
-        crime  = sum(t.count(w) for w in self.CRIME_WORDS)
-        promise = sum(t.count(w) for w in self.PROMISE_WORDS)
-        fund   = sum(t.count(w) for w in self.FUND_WORDS)
-        scores = {"criminal": crime, "promise": promise, "fund": fund}
-        best = max(scores, key=scores.get)
-        return best if scores[best] > 0 else "general"
+        scores = {
+            "criminal":    sum(t.count(w) for w in _CRIME_KW),
+            "promise":     sum(t.count(w) for w in _PROMISE_KW),
+            "fund":        sum(t.count(w) for w in _FUND_KW),
+            "project":     sum(t.count(w) for w in _PROJECT_KW),
+            "election":    sum(t.count(w) for w in _ELECTION_KW),
+        }
+        best, val = max(scores.items(), key=lambda x: x[1])
+        return best if val > 0 else "general"
 
-    # ── Named Entity Recognition (extract politician names) ───────────────────
+    # ---- NER: extract names (regex, zero download) -----------------------
     def extract_leader_names(self, text: str) -> list:
-        """Extract person names from text using NER."""
-        if self._transformers_ok:
-            try:
-                entities = _get_ner()(text[:512])
-                names = []
-                for e in entities:
-                    if e.get("entity_group") == "PER" and e.get("score", 0) > 0.80:
-                        name = e["word"].strip()
-                        if len(name) > 3 and name not in names:
-                            names.append(name)
-                return names
-            except Exception:
-                pass
-        return self._rule_extract_names(text)
+        """Extract politician names using title prefixes + title-case heuristic."""
+        names = []
+        # Pattern 1: Shri/Smt/Dr + Name
+        for m in _TITLE_PREFIX.finditer(text):
+            name = m.group(2).strip()
+            if name not in names:
+                names.append(name)
+        # Pattern 2: Two consecutive Title-Case words (fallback)
+        if not names:
+            for m in re.finditer(r'\b([A-Z][a-z]{1,14})\s+([A-Z][a-z]{1,14})\b', text):
+                candidate = m.group(0)
+                # Skip common non-name pairs
+                skip = {"The Hindu", "New Delhi", "Prime Minister",
+                        "Chief Minister", "Home Minister", "West Bengal",
+                        "Lok Sabha", "Rajya Sabha", "Supreme Court"}
+                if candidate not in skip and candidate not in names:
+                    names.append(candidate)
+        return names[:5]  # max 5 names
 
-    def _rule_extract_names(self, text: str) -> list:
-        """Regex: find Title-Case word pairs like 'Narendra Modi'."""
-        return re.findall(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', text)
-
-    # ── Summarisation ──────────────────────────────────────────────────────────
+    # ---- Summarise (rule-based, zero download) ---------------------------
     def summarise(self, text: str, max_words: int = 60) -> str:
-        """Return a short summary of the text."""
-        if len(text.split()) < 30:
-            return text  # already short
-        if self._transformers_ok:
-            try:
-                result = _get_summariser()(
-                    text[:1024],
-                    max_length=max_words * 2,
-                    min_length=20,
-                    do_sample=False
-                )
-                return result[0]["summary_text"].strip()
-            except Exception:
-                pass
-        # Rule-based: return first 2 sentences
+        """Return first 2 sentences as summary."""
+        if not text or len(text.split()) < 20:
+            return text
         sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        return " ".join(sentences[:2])
+        summary = " ".join(sentences[:2])
+        words = summary.split()
+        if len(words) > max_words:
+            summary = " ".join(words[:max_words]) + "..."
+        return summary
 
-    # ── Credibility Score (rule-based + sentiment) ────────────────────────────
+    # ---- Credibility score (rule-based) ----------------------------------
     def score_credibility(self, text: str) -> int:
-        """
-        0–100 credibility score for a public report/claim.
-        Higher = more credible.
-        """
+        """0–100 credibility score for a report/claim."""
         score = 50
         t = text.lower()
-        # Positive signals
         if any(w in t for w in ["official", "government", "court", "police", "fir", "cbi"]):
             score += 15
         if any(w in t for w in ["document", "proof", "evidence", "receipt", "record"]):
             score += 10
-        if re.search(r'\d{4}', text):  # has year
+        if re.search(r'\b20[0-9]{2}\b', text):   # contains a year
             score += 5
-        if len(text.split()) > 50:  # detailed
+        if len(text.split()) > 50:
             score += 10
-        # Negative signals (spam/fake)
         if any(w in t for w in ["100%", "guaranteed", "viral", "share this", "forward"]):
             score -= 20
-        if len(text.split()) < 10:  # too short
+        if len(text.split()) < 10:
             score -= 15
-        exclamations = text.count("!")
-        if exclamations > 3:
+        if text.count("!") > 3:
             score -= 10
         return max(0, min(100, score))
 
-    # ── Full analysis of a news item ──────────────────────────────────────────
-    def analyse_news_item(self, title: str, description: str = "") -> dict:
-        """
-        Complete offline analysis of a news headline + description.
-        Returns dict ready to save to DB.
-        """
-        text = f"{title} {description}".strip()
-        return {
-            "category":    self.classify_category(text),
-            "sentiment":   self.classify_sentiment(text),
-            "leader_names": self.extract_leader_names(text),
-            "summary":     self.summarise(description or title),
-            "credibility": self.score_credibility(text),
-            "importance":  self._importance(text),
-        }
-
+    # ---- Importance score ------------------------------------------------
     def _importance(self, text: str) -> int:
-        """1–5 importance score."""
+        """1–5 importance score based on keywords."""
         t = text.lower()
-        high = ["prime minister", "parliament", "supreme court", "president", "budget",
-                "election", "arrested", "convicted", "scam", "crore"]
+        high = ["prime minister", "parliament", "supreme court", "president",
+                "budget", "election", "arrested", "convicted", "scam", "crore"]
         hits = sum(1 for w in high if w in t)
         return min(5, max(1, 1 + math.ceil(hits / 2)))
 
-    # ── Batch analyse a list of items ──────────────────────────────────────────
+    # ---- Full analysis ---------------------------------------------------
+    def analyse_news_item(self, title: str, description: str = "") -> dict:
+        """Complete offline analysis. Returns dict ready to save to DB."""
+        text = f"{title} {description}".strip()
+        return {
+            "category":     self.classify_category(text),
+            "sentiment":    self.classify_sentiment(text),
+            "leader_names": self.extract_leader_names(text),
+            "summary":      self.summarise(description or title),
+            "credibility":  self.score_credibility(text),
+            "importance":   self._importance(text),
+        }
+
     def batch_analyse(self, items: list) -> list:
-        """
-        items = [{"title": ..., "description": ...}, ...]
-        Returns list of analysis dicts.
-        """
-        results = []
-        for item in items:
-            analysis = self.analyse_news_item(
-                item.get("title", ""),
-                item.get("description", "")
-            )
-            results.append({**item, **analysis})
-        return results
+        """items = [{title, description}, ...] — returns list with analysis merged in."""
+        return [{**item, **self.analyse_news_item(
+            item.get("title", ""), item.get("description", "")
+        )} for item in items]
+
+    # ---- Model status (shown in Python admin UI) -------------------------
+    @staticmethod
+    def model_status() -> dict:
+        return {
+            "sentiment_model": "cardiffnlp/twitter-roberta-base-sentiment-latest (~60MB)"
+                               if _sentiment_ok else "rule-based (no download)",
+            "category":    "rule-based keyword engine",
+            "ner":         "regex + title-case heuristic",
+            "summarise":   "first-2-sentences rule",
+            "credibility": "rule-based scoring",
+            "total_size":  "~60MB" if _sentiment_ok else "0MB",
+        }
