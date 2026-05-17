@@ -15,6 +15,29 @@ function php_ok(): bool { return version_compare(PHP_VERSION,'8.1','>='); }
 $siteUrl = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off'?'https':'http')
           .'://'.$_SERVER['HTTP_HOST'];
 
+// ---- Safe SQL executor: runs each statement one by one --------------
+function run_sql(PDO $pdo, string $file): void {
+    if (!file_exists($file)) return;
+    $raw = file_get_contents($file);
+
+    // Strip comments, split by semicolon
+    $raw   = preg_replace('/--[^\n]*\n/', "\n", $raw);   // remove -- comments
+    $raw   = preg_replace('/\/\*.*?\*\//s', '', $raw);    // remove /* */ comments
+    $stmts = array_filter(array_map('trim', explode(';', $raw)));
+
+    foreach ($stmts as $sql) {
+        if ($sql === '') continue;
+        try {
+            $pdo->exec($sql);
+        } catch (PDOException $e) {
+            // Skip duplicate/already-exists errors silently
+            if (!in_array($e->getCode(), ['42S01','42000','23000'])) {
+                // non-fatal: log but continue
+            }
+        }
+    }
+}
+
 // ---- Process Step 2 form ----------------------------------------
 if ($step===2 && $_SERVER['REQUEST_METHOD']==='POST') {
     $dbHost  = trim($_POST['db_host']  ?? 'localhost');
@@ -26,37 +49,36 @@ if ($step===2 && $_SERVER['REQUEST_METHOD']==='POST') {
     $aEmail  = trim($_POST['admin_email'] ?? '');
     $aPass   = trim($_POST['admin_pass']  ?? '');
 
-    if (!$dbName || !$dbUser)        $error = 'Database name and username are required.';
-    elseif (!$aEmail)                $error = 'Admin email is required.';
-    elseif (strlen($aPass) < 6)     $error = 'Admin password must be at least 6 characters.';
+    if (!$dbName || !$dbUser)       $error = 'Database name and username are required.';
+    elseif (!$aEmail)               $error = 'Admin email is required.';
+    elseif (strlen($aPass) < 6)    $error = 'Admin password must be at least 6 characters.';
     else {
         try {
             $pdo = new PDO(
                 "mysql:host=$dbHost;port=$dbPort;charset=utf8mb4",
                 $dbUser, $dbPass,
-                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+                [
+                    PDO::ATTR_ERRMODE                  => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE       => PDO::FETCH_ASSOC,
+                    PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,   // fix unbuffered error
+                    PDO::ATTR_EMULATE_PREPARES         => true,   // needed for multi-stmt
+                ]
             );
+
+            // Create DB
             $pdo->exec("CREATE DATABASE IF NOT EXISTS `$dbName` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
             $pdo->exec("USE `$dbName`");
 
-            // Run schema
-            $schema = $root.'/installer/schema.sql';
-            if (file_exists($schema)) {
-                foreach (array_filter(array_map('trim',explode(';',file_get_contents($schema)))) as $s)
-                    try { if($s) $pdo->exec($s); } catch(PDOException $e){}
-            }
-
-            // Run seed if exists
-            foreach (['/database/seed_states_leaders.sql','/installer/seed.sql'] as $sf)
-                if (file_exists($root.$sf))
-                    foreach (array_filter(array_map('trim',explode(';',file_get_contents($root.$sf)))) as $s)
-                        try { if($s && !str_starts_with($s,'--')) $pdo->exec($s); } catch(PDOException $e){}
+            // Run schema + seeds one statement at a time
+            run_sql($pdo, $root.'/installer/schema.sql');
+            run_sql($pdo, $root.'/database/seed_states_leaders.sql');
+            run_sql($pdo, $root.'/installer/seed.sql'); // optional
 
             // Generate token
             $token = gen_token();
 
             // Write .env
-            $env = implode("\n",[
+            $env = implode("\n", [
                 "APP_NAME=NetaTrack India",
                 "APP_URL=$siteUrl",
                 "APP_ENV=production",
@@ -71,22 +93,27 @@ if ($step===2 && $_SERVER['REQUEST_METHOD']==='POST') {
             ])."\n";
             file_put_contents($root.'/.env', $env);
 
-            // Insert settings
-            $ins = $pdo->prepare("INSERT IGNORE INTO settings (key_name,value) VALUES (?,?)");
+            // Insert default settings
+            $ins = $pdo->prepare("INSERT IGNORE INTO settings (key_name, value) VALUES (?, ?)");
             foreach ([
-                ['site_name','NetaTrack India'],
-                ['site_url',$siteUrl],
-                ['admin_api_token',$token],
-                ['gemini_key',''],['sarvam_key',''],['openai_key',''],
-            ] as [$k,$v]) try{$ins->execute([$k,$v]);}catch(PDOException $e){}
+                ['site_name',       'NetaTrack India'],
+                ['site_url',        $siteUrl],
+                ['admin_api_token', $token],
+                ['gemini_key',      ''],
+                ['sarvam_key',      ''],
+                ['openai_key',      ''],
+            ] as [$k, $v]) {
+                try { $ins->execute([$k, $v]); } catch (PDOException $e) {}
+            }
 
-            // Create admin
+            // Create admin user
             $pdo->prepare(
-                "INSERT IGNORE INTO users (name,email,password,role,status) VALUES (?,?,?,'admin','active')"
-            )->execute([$aName,$aEmail,password_hash($aPass,PASSWORD_BCRYPT)]);
+                "INSERT IGNORE INTO users (name, email, password, role, status) VALUES (?, ?, ?, 'admin', 'active')"
+            )->execute([$aName, $aEmail, password_hash($aPass, PASSWORD_BCRYPT)]);
 
             $step = 3;
-        } catch(PDOException $e) {
+
+        } catch (PDOException $e) {
             $error = 'Database error: '.$e->getMessage();
         }
     }
@@ -94,14 +121,14 @@ if ($step===2 && $_SERVER['REQUEST_METHOD']==='POST') {
 
 // ---- Requirements -----------------------------------------------
 $reqs = [
-    ['PHP 8.1+',    php_ok(),                        PHP_VERSION, true],
-    ['PDO MySQL',   extension_loaded('pdo_mysql'),   'required',  true],
-    ['cURL',        extension_loaded('curl'),        'optional',  false],
-    ['mbstring',    extension_loaded('mbstring'),    'optional',  false],
-    ['OpenSSL',     extension_loaded('openssl'),     'optional',  false],
-    ['Folder write',is_writable($root)||is_writable($root.'/.env'),'needed',true],
+    ['PHP 8.1+',     php_ok(),                        PHP_VERSION, true],
+    ['PDO MySQL',    extension_loaded('pdo_mysql'),   'required',  true],
+    ['cURL',         extension_loaded('curl'),        'optional',  false],
+    ['mbstring',     extension_loaded('mbstring'),    'optional',  false],
+    ['OpenSSL',      extension_loaded('openssl'),     'optional',  false],
+    ['Folder write', is_writable($root)||is_writable($root.'/.env'), 'needed', true],
 ];
-$allOk = !in_array(false, array_map(fn($r)=>$r[1]||!$r[3], $reqs));
+$allOk = !in_array(false, array_map(fn($r) => $r[1] || !$r[3], $reqs));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -131,7 +158,7 @@ input{width:100%;padding:9px 12px;background:#1e293b;border:1px solid #334155;bo
 input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
 .hint{font-size:.75rem;color:#475569;margin-top:-8px;margin-bottom:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.btn{display:block;width:100%;padding:11px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;margin-top:4px;transition:background .15s}
+.btn{display:block;width:100%;padding:11px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;margin-top:4px;transition:background .15s;text-align:center;text-decoration:none}
 .btn:hover{background:#2563eb}
 .alert{padding:11px 14px;border-radius:8px;font-size:.88rem;margin-bottom:16px;border-left:4px solid}
 .alert.err{background:rgba(239,68,68,.1);border-color:#ef4444;color:#fca5a5}
@@ -141,11 +168,10 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
 .req:last-child{border-bottom:none}
 .ok{color:#22c55e;font-weight:700}
 .fail{color:#ef4444;font-weight:700}
-.warn{color:#f59e0b;font-weight:700}
+.opt{color:#f59e0b;font-weight:700}
 .token-box{display:flex;align-items:center;gap:8px;background:#020617;border:1px solid #334155;border-radius:8px;padding:10px 12px;font-family:monospace;font-size:.8rem;color:#94a3b8;word-break:break-all;margin-bottom:4px}
 .copy{flex-shrink:0;padding:4px 10px;background:#1e293b;border:1px solid #334155;border-radius:5px;color:#94a3b8;font-size:.75rem;cursor:pointer}
 .copy:hover{color:#f8fafc}
-.hint2{font-size:.75rem;color:#475569;margin-bottom:16px}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
 .btn2{display:block;padding:10px;text-align:center;border-radius:8px;font-weight:700;font-size:.9rem;text-decoration:none;border:1px solid #334155;color:#94a3b8;transition:all .15s}
 .btn2:hover{color:#f8fafc;border-color:#475569}
@@ -175,37 +201,44 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
 
   <div class="body">
 
-  <?php if($step===1): ?>
+  <?php if($step===1): /* STEP 1 */ ?>
 
     <h3>Server Requirements</h3>
     <?php foreach($reqs as [$label,$ok,$note,$req]): ?>
     <div class="req">
-      <span style="color:#cbd5e1"><?= htmlspecialchars($label) ?> <span style="color:#475569;font-size:.75rem">(<?= $note ?>)</span></span>
-      <span class="<?= $ok?'ok':($req?'fail':'warn') ?>"><?= $ok?'✓ OK':($req?'✗ Required':'⚠ Optional') ?></span>
+      <span style="color:#cbd5e1"><?= htmlspecialchars($label) ?>
+        <span style="color:#475569;font-size:.75rem">(<?= $note ?>)</span>
+      </span>
+      <span class="<?= $ok?'ok':($req?'fail':'opt') ?>">
+        <?= $ok?'✓ OK':($req?'✗ Required':'⚠ Optional') ?>
+      </span>
     </div>
     <?php endforeach ?>
 
     <div style="margin-top:18px">
       <?php if($allOk): ?>
-        <a href="?step=2" class="btn" style="text-decoration:none;display:block;text-align:center">Continue →</a>
+        <a href="?step=2" class="btn">Continue →</a>
       <?php else: ?>
         <div class="alert err">Fix the required items above first.</div>
-        <a href="" class="btn" style="text-decoration:none;display:block;text-align:center;background:#1e293b;border:1px solid #334155;color:#94a3b8">🔄 Re-check</a>
+        <a href="" class="btn" style="background:#1e293b;color:#94a3b8;border:1px solid #334155">🔄 Re-check</a>
       <?php endif ?>
     </div>
 
-  <?php elseif($step===2): ?>
+  <?php elseif($step===2): /* STEP 2 */ ?>
 
     <?php if($error): ?>
     <div class="alert err"><?= htmlspecialchars($error) ?></div>
     <?php endif ?>
 
     <form method="POST" action="?step=2">
-      <h3>🗄️ Database &mdash; <span style="font-weight:400">from cPanel → MySQL Databases</span></h3>
+
+      <h3>🗄️ Database
+        <span style="font-weight:400">— cPanel → MySQL Databases</span>
+      </h3>
 
       <label>Database Host</label>
       <input name="db_host" value="localhost">
-      <div class="hint">Almost always <strong style="color:#cbd5e1">localhost</strong> on shared hosting</div>
+      <div class="hint">Use <strong style="color:#cbd5e1">localhost</strong> on shared hosting</div>
 
       <label>Database Name</label>
       <input name="db_name" placeholder="e.g. u123456_netatrack" required>
@@ -217,7 +250,7 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
         </div>
         <div>
           <label>DB Password</label>
-          <input type="password" name="db_pass" placeholder="••••••••">
+          <input type="password" name="db_pass" placeholder="••••••">
         </div>
       </div>
 
@@ -235,7 +268,7 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
       <button type="submit" class="btn">🚀 Install Now</button>
     </form>
 
-  <?php elseif($step===3): ?>
+  <?php elseif($step===3): /* STEP 3 */ ?>
 
     <div style="text-align:center;padding:8px 0 18px">
       <div style="font-size:3rem;margin-bottom:8px">🎉</div>
@@ -251,13 +284,18 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
     </div>
 
     <label style="color:#94a3b8;font-size:.82rem;display:block;margin-bottom:6px">
-      🔑 Admin API Token <span style="color:#475569">(copy &amp; save — for Python app)</span>
+      🔑 Admin API Token <span style="color:#475569">(save — needed for Python app)</span>
     </label>
     <div class="token-box">
       <span id="tok"><?= htmlspecialchars($token) ?></span>
-      <button class="copy" onclick="navigator.clipboard.writeText(document.getElementById('tok').textContent).then(()=>this.textContent='✓ Copied')">Copy</button>
+      <button class="copy"
+        onclick="navigator.clipboard.writeText(document.getElementById('tok').textContent).then(()=>{this.textContent='✓ Copied';setTimeout(()=>this.textContent='Copy',2000)})">
+        Copy
+      </button>
     </div>
-    <div class="hint2">Python app → Settings → Push API Token → paste here</div>
+    <div style="font-size:.75rem;color:#475569;margin-bottom:16px">
+      Python app → Settings → Push API Token → paste here
+    </div>
 
     <div class="btns">
       <a href="/admin" class="btn2 primary">🏛 Admin Panel</a>
@@ -265,7 +303,8 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
     </div>
 
     <div class="alert warn" style="margin-top:14px;font-size:.82rem">
-      ⚠️ Delete the <code>installer/</code> folder from your server after this!
+      ⚠️ Delete the <code style="background:#1e293b;padding:1px 5px;border-radius:3px">installer/</code>
+      folder from your server after this!
     </div>
 
   <?php endif ?>
