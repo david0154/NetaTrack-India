@@ -1,4 +1,4 @@
-# 🇮🇳 NetaTrack India
+# <img src="logo.png" width="48" style="vertical-align:middle"> NetaTrack India
 
 > **India's political accountability platform** — track politicians, monitor promises, detect corruption, analyse funds, and rate leaders using AI.
 
@@ -7,6 +7,12 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)](https://nextjs.org)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0+-4479A1?logo=mysql)](https://mysql.com)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+<p align="center">
+  <img src="logo.png" width="180" alt="NetaTrack India Logo"/>
+  <br/>
+  <b>Making Indian politics transparent, one data point at a time 🇮🇳</b>
+</p>
 
 ---
 
@@ -46,6 +52,7 @@ NetaTrack India is a full-stack political accountability system with three parts
 
 ```
 NetaTrack-India/
+├── logo.png                    # NetaTrack India logo
 ├── php/                        # PHP website backend
 │   ├── src/
 │   │   └── AI/
@@ -87,7 +94,6 @@ NetaTrack-India/
 ├── src/                        # Next.js frontend
 ├── installer/                  # Web installer (visit /installer)
 ├── database/                   # SQL schema files
-├── database_extra.sql          # Extra tables for auto-fetch
 └── python-admin/database_extra.sql
 ```
 
@@ -157,26 +163,13 @@ Sarvam AI Key     →  https://sarvam.ai (best for Hindi/regional)
 ### Use AI anywhere in PHP
 
 ```php
-// In any controller, view, or route:
 $ai = ai();  // loads keys from DB settings automatically
 
-// Generate leader bio
-$bio = $ai->summariseLeader($leader);
-
-// Analyse a public report
+$bio    = $ai->summariseLeader($leader);
 $result = $ai->analyseReport($report_text, $leader_name);
-// Returns: category, sentiment, credibility 0-100, is_spam, suggested_action
-
-// Fact check a claim
-$check = $ai->factCheck("PM built 5000 km highway", "Narendra Modi");
-// Returns: verdict, confidence, explanation, sources_hint
-
-// Classify a news headline
-$info = $ai->classifyNews($title, $description);
-// Returns: category, leader_name, sentiment, importance 1-5, tags
-
-// Translate to Hindi (uses Sarvam AI first, then any AI)
-$hindi = $ai->translateToHindi("Promise fulfilled in Bihar");
+$check  = $ai->factCheck("PM built 5000 km highway", "Narendra Modi");
+$info   = $ai->classifyNews($title, $description);
+$hindi  = $ai->translateToHindi("Promise fulfilled in Bihar");
 ```
 
 ---
@@ -191,7 +184,7 @@ pip install -r requirements.txt
 ```
 
 > **First run downloads ~500MB of AI models** (DistilBERT, DistilBART, BERT NER).
-> After that, everything works offline.
+> After that, everything works **offline**.
 
 ### Run
 
@@ -209,10 +202,6 @@ A **DB Connect dialog** appears. Enter your MySQL details and click **Connect**.
 > python main.py
 > ```
 
-### Add AI Keys in Python Admin
-
-Go to **Auto-Fetch tab → AI API Keys section** → enter any keys → click **Load from Settings** to load saved keys automatically.
-
 ---
 
 ## AI System — How It Works
@@ -220,7 +209,7 @@ Go to **Auto-Fetch tab → AI API Keys section** → enter any keys → click **
 NetaTrack uses a **2-step AI pipeline**:
 
 ```
-Step 1: Local AI (Offline, always runs)
+Step 1: Local AI (Offline, always runs, no key needed)
    ↓ DistilBERT   → sentiment (positive/negative/neutral)
    ↓ DistilBART   → category (criminal/fund/promise/...)
    ↓ BERT NER     → extract politician names from text
@@ -246,8 +235,8 @@ Step 2: Cloud AI Router (runs if any key is configured)
 
 ### Local Pretrained Models (Python)
 
-| Model | Task | Download Size |
-|-------|------|--------------|
+| Model | Task | Size |
+|-------|------|------|
 | `distilbert-base-uncased-finetuned-sst-2` | Sentiment analysis | ~67MB |
 | `typeform/distilbart-mnli-12-3` | Zero-shot category classification | ~250MB |
 | `dbmdz/bert-large-cased-finetuned-conll03` | Named entity recognition | ~400MB |
@@ -257,170 +246,130 @@ Step 2: Cloud AI Router (runs if any key is configured)
 
 ## Auto-Fetch Engine
 
-Open the **🤖 Auto-Fetch tab** in the Python admin app. Select tasks, enter/load AI keys, and click **▶ Run Auto-Fetch**.
+Open the **🤖 Auto-Fetch tab** in the Python admin app. Select tasks and click **▶ Run Auto-Fetch**.
 
 ### 8 Tasks
 
 | # | Task | What it does |
 |---|------|-------------|
 | 1 | **India Govt Data** | ECI affidavits, Sansad LS API, Rajya Sabha members, MyNeta criminal data, 15 RSS feeds |
-| 2 | **Enrich Leaders** | Fill missing bios/photos from Wikipedia, update party/state/constituency |
-| 3 | **Classify Announcements** | Fetch 13 news/govt RSS feeds, classify with LocalAI + Cloud AI |
-| 4 | **Track Promises** | Search news for each pending promise, AI decides fulfilled/broken/in_progress |
-| 5 | **Detect Cases** | Scan news for criminal/corruption/fake cases per leader, LocalAI pre-screens |
-| 6 | **Track Funds** | MPLADS fund utilization per MP, detect leakage suspected |
-| 7 | **Recalculate Scores** | Rule-based + AI holistic score, update rankings |
+| 2 | **Enrich Leaders** | Fill missing bios/photos from Wikipedia |
+| 3 | **Classify Announcements** | 13 news/govt RSS feeds, LocalAI + Cloud AI classify |
+| 4 | **Track Promises** | Search news per promise, AI decides fulfilled/broken/in_progress |
+| 5 | **Detect Cases** | Scan news for criminal/fake cases, LocalAI pre-screens |
+| 6 | **Track Funds** | MPLADS fund utilization per MP, detect leakage |
+| 7 | **Recalculate Scores** | Rule-based + AI holistic score + ranking |
 | 8 | **Push to Website** | Push all data to live site via REST API |
 
 ### Score Formula
 
 ```
-Total Score = Promise% × 0.20
-            + Project% × 0.15
-            + Fund%    × 0.15
-            + Criminal × 0.25
-            + Transp   × 0.10
-            + AI Score × 0.15
+Total Score = Promise% × 0.20 + Project% × 0.15 + Fund% × 0.15
+            + Criminal × 0.25 + Transparency × 0.10 + AI Score × 0.15
 ```
 
 ---
 
 ## India Government Data Sources
 
-The engine fetches from these official sources automatically:
-
-### Government Portals
 | Source | Data |
 |--------|------|
-| **Sansad.in** (Lok Sabha API) | All 543 MP names, party, constituency, state |
-| **Sansad.in** (Rajya Sabha API) | All 245 RS MP names |
-| **ECI / MyNeta API** | Candidate affidavits: assets, liabilities, declared criminal cases |
-| **MyNeta Criminal** | MPs with pending criminal cases at election time |
-| **PMO India RSS** | Prime Minister's press releases |
-| **PIB India RSS** | Press Information Bureau — central government news |
+| **Sansad.in** (Lok Sabha) | All 543 MP names, party, constituency |
+| **Sansad.in** (Rajya Sabha) | All 245 RS MP names |
+| **ECI / MyNeta** | Candidate affidavits: assets, liabilities, criminal cases |
+| **MyNeta Criminal** | MPs with pending criminal cases |
+| **PMO India RSS** | Prime Minister press releases |
+| **PIB India RSS** | Central government news |
 | **MyGov RSS** | Government scheme announcements |
-| **Lok Sabha RSS** | Parliamentary debates and notices |
+| **Lok Sabha RSS** | Parliamentary debates |
 | **Rajya Sabha RSS** | Upper house news |
-
-### News & Accountability
-| Source | Type |
-|--------|------|
 | NDTV, The Hindu, Indian Express | National politics news |
-| Hindustan Times, LiveMint, ANI, PTI | Breaking news |
+| Hindustan Times, ANI, PTI | Breaking news |
 | ADR India | Election/criminal affidavit analysis |
-| DuckDuckGo Instant API | General news search (no key) |
 
 ---
 
 ## Python → Website Push API
 
-After collecting and analysing data, push it directly to your live website.
-
-### Setup
-
-1. Go to **PHP Admin → Settings → Push API** → copy **Admin API Token** (or click Generate)
-2. In **Python Admin → Auto-Fetch tab → Push to Website section** → enter Site URL + Token
-3. Click **🚀 Push to Website Now** OR tick **🌐 Push to Website after Engine finishes**
-
-### Push Endpoints (PHP receives these)
+1. PHP Admin → Settings → **Admin API Token** → copy or click Generate
+2. Python Admin → Auto-Fetch tab → **Push to Website** → enter Site URL + Token
+3. Click **🚀 Push to Website Now** or tick **Push after Engine finishes**
 
 ```
-POST /api/v1/push/leaders        → upsert all leader records
-POST /api/v1/push/scores         → update all score columns
-POST /api/v1/push/cases          → insert new criminal cases
-POST /api/v1/push/announcements  → insert approved announcements
-POST /api/v1/push/funds          → upsert MPLADS fund records
+POST /api/v1/push/leaders        → upsert all leaders
+POST /api/v1/push/scores         → update all scores
+POST /api/v1/push/cases          → insert criminal cases
+POST /api/v1/push/announcements  → insert announcements
+POST /api/v1/push/funds          → upsert fund records
 ```
-
-All endpoints require `Authorization: Bearer <admin_api_token>` header.
 
 ---
 
 ## PHP AI Endpoints
 
-Public REST endpoints available on the website for frontend/AJAX use:
-
 ```
-POST /api/ai/summarise      body: { leader_id: 5 }
-POST /api/ai/factcheck      body: { claim: "...", leader_name: "..." }
-POST /api/ai/translate      body: { text: "Promise fulfilled" }
-POST /api/ai/chat           body: { question: "...", leader_name: "..." }
-POST /api/ai/classify_news  body: { title: "...", description: "..." }  [admin only]
+POST /api/ai/summarise    { leader_id: 5 }
+POST /api/ai/factcheck    { claim: "...", leader_name: "..." }
+POST /api/ai/translate    { text: "..." }
+POST /api/ai/chat         { question: "...", leader_name: "..." }
 ```
-
-All endpoints are **rate-limited per session** to prevent abuse.
 
 ---
 
 ## Admin Panel Features
 
-### PHP Web Admin (`/admin`)
-- **Dashboard** — stats, recent reports, pending approvals
-- **Leaders** — add/edit/delete, score sliders, verify badge
-- **Reports** — approve/reject citizen reports, AI analysis shown
-- **Users** — ban/unban, change roles (user/moderator/admin)
-- **Announcements** — review AI-classified news items
-- **Settings** — all 5 AI keys, push API token, SMTP, Analytics, Ads
+### PHP Web Admin
+- Dashboard, Leaders, Reports, Users, Announcements, Settings
+- Settings has all 5 AI keys + Push API token + SMTP + Analytics
 
 ### Python Desktop Admin
 | Tab | Features |
 |-----|---------|
-| 📊 Dashboard | 6 live stat cards, pending reports table, top leaders |
-| 🤖 Auto-Fetch | 8 task checkboxes, 5 AI key fields, push config, live log |
-| 👤 Leaders | Search, add, edit (score sliders), delete |
-| 📋 Reports | Filter by status, approve/reject one-click |
-| 👥 Users | Search, ban/unban, change role |
-| 📰 Scraper | Trigger HTTP scraper, live log, recent jobs |
-| ⚙️ Settings | All keys + SMTP + site config |
+| 📊 Dashboard | Stats, pending reports, top leaders |
+| 🤖 Auto-Fetch | 8 tasks, 5 AI keys, push config, live log |
+| 👤 Leaders | Search, add, edit, delete |
+| 📋 Reports | Filter, approve/reject |
+| 👥 Users | Ban/unban, change role |
+| 📰 Scraper | Trigger, live log |
+| ⚙️ Settings | All keys + config |
 
 ---
 
 ## Cron Jobs
 
-Add these to your server crontab (`crontab -e`):
-
 ```bash
-# AI auto-classify announcements, fill bios, analyse reports (every 5 min)
-*/5 * * * * php /var/www/netatrack/php/artisan cron:ai >> /var/log/netatrack_ai.log 2>&1
+# AI auto-tasks every 5 minutes
+*/5 * * * * php /var/www/netatrack/php/artisan cron:ai
 
-# Full auto-fetch engine (daily at 2 AM)
+# Full engine daily at 2 AM
 0 2 * * * cd /var/www/netatrack/python-admin && python -c "
-from db.connection import DBConnection
-from auto.engine import AutoEngine
-db = DBConnection()
-db.connect_from_env()
-engine = AutoEngine(db, {}, print)
-engine.start(['govt_data','leaders','announcements','promises','cases','funds','scores','push'])
+from db.connection import DBConnection; from auto.engine import AutoEngine
+db=DBConnection(); db.connect_from_env()
+AutoEngine(db,{},print).start(['govt_data','leaders','announcements','promises','cases','funds','scores','push'])
 import time; time.sleep(3600)
-" >> /var/log/netatrack_engine.log 2>&1
+"
 ```
 
 ---
 
 ## Database Tables
 
-### Core Tables
 | Table | Description |
 |-------|-------------|
-| `leaders` | Politicians with scores, bio, photo, ECI data |
+| `leaders` | Politicians with scores, bio, ECI data |
 | `parties` | Political parties |
 | `states` | Indian states |
-| `promises` | Leader promises with fulfillment status |
+| `promises` | Leader promises + fulfillment status |
 | `projects` | Development projects |
 | `reports` | Citizen-filed reports |
 | `users` | Registered users |
 | `settings` | All site/AI/push settings |
-
-### Auto-Fetch Tables (run `database_extra.sql` once)
-| Table | Description |
-|-------|-------------|
-| `announcements` | News items from RSS + govt feeds |
-| `criminal_cases` | Criminal/corruption/fake cases per leader |
-| `fund_records` | MPLADS fund allocation + utilization per MP |
-
-### Run extra migrations
+| `announcements` | News from RSS + govt feeds |
+| `criminal_cases` | Cases per leader (real + fake flagged) |
+| `fund_records` | MPLADS fund allocation per MP |
 
 ```bash
+# Run extra migration once
 mysql -u root -p netatrack < python-admin/database_extra.sql
 ```
 
@@ -428,113 +377,40 @@ mysql -u root -p netatrack < python-admin/database_extra.sql
 
 ## Testing Checklist
 
-### ✅ PHP Website
-
 ```bash
-# 1. Test DB connection
-php -r "require 'bootstrap.php'; echo db()->fetchOne('SELECT 1')['1'];"
-
-# 2. Test AI router
+# PHP — test AI
 php -r "require 'bootstrap.php'; echo ai()->ask('Say hello in 5 words');"
 
-# 3. Test push API (replace with your token)
-curl -X POST https://yoursite.com/api/v1/push/leaders \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"leaders":[]}'
-# Expected: {"message":"0 leaders upserted","ok":0}
-
-# 4. Test AI endpoint
-curl -X POST https://yoursite.com/api/ai/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question":"Who is the PM of India?","leader_name":""}'
-```
-
-### ✅ Python Admin App
-
-```bash
-cd python-admin
-
-# 1. Test DB connection
-python -c "from db.connection import DBConnection; db=DBConnection(); db.connect('localhost','netatrack','root',''); print('DB OK')"
-
-# 2. Test LocalAI (no internet needed)
+# Python — test LocalAI (offline, no key)
 python -c "
 from auto.local_ai import LocalAI
-ai = LocalAI()
-r = ai.analyse_news_item('PM Modi arrested by CBI for corruption case', 'Court orders arrest')
-print(r)
+print(LocalAI().analyse_news_item('PM Modi arrested by CBI','Court orders arrest'))
 "
-# Expected output: category=criminal, sentiment=negative, names=[Modi], importance=4+
 
-# 3. Test AI Router
+# Python — test push API
+curl -X POST https://yoursite.com/api/v1/push/leaders \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" -d '{"leaders":[]}'
+
+# Python — full engine test (safe, no push)
 python -c "
-from auto.ai_router import AIRouter
-ai = AIRouter(keys={'gemini': 'YOUR_KEY'})
-print(ai.ask('Say: test OK'))
+from db.connection import DBConnection; from auto.engine import AutoEngine
+db=DBConnection(); db.connect('localhost','netatrack','root','')
+AutoEngine(db,{'gemini':'YOUR_KEY'},print).start(['govt_data','leaders','scores'])
 "
-
-# 4. Test RSS fetch
-python -c "
-from auto.base import AutoBase
-class T(AutoBase): pass
-t = T(None, '', print)
-text = t.http_get('https://feeds.feedburner.com/ndtvnews-india-news')
-print('RSS OK, length:', len(text))
-"
-
-# 5. Test website push
-python -c "
-from auto.website_pusher import WebsitePusher
-# Set site_url and admin_api_token in settings first
-"
-```
-
-### ✅ Full Engine Test (safe — read-only run without push)
-
-```python
-# test_engine.py
-from db.connection import DBConnection
-from auto.engine import AutoEngine
-
-db = DBConnection()
-db.connect('localhost', 'netatrack', 'root', 'yourpassword')
-
-engine = AutoEngine(db, {'gemini': 'YOUR_GEMINI_KEY'}, print)
-engine.start(['govt_data', 'leaders', 'scores'])  # no 'push' = safe test
 ```
 
 ---
 
 ## Troubleshooting
 
-### Python: `ModuleNotFoundError: transformers`
-```bash
-pip install transformers torch
-# CPU-only (smaller):
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-```
-
-### Python: Models download slowly
-Models are cached in `~/.cache/huggingface/` after first download. If slow, use a VPN or download manually.
-
-### PHP: `ai()` returns empty string
-- Check Admin → Settings → AI APIs — at least one key must be saved
-- Check PHP error log: `tail -f /var/log/apache2/error.log`
-- Test: `curl https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_KEY -d '{"contents":[{"parts":[{"text":"hello"}]}]}' -H 'Content-Type: application/json'`
-
-### Push API: `401 Unauthorized`
-- Check `admin_api_token` matches in both Python admin settings and PHP settings table
-- Token is compared with `hash_equals()` — must be exact match
-
-### Engine: RSS feeds return empty
-Some feeds block bots. The engine uses `User-Agent: Mozilla/5.0 NetaTrackBot/1.0`. If still blocked, add your own RSS proxies in `GOVT_RSS_SOURCES` in `govt_data_fetcher.py`.
-
-### MySQL: `Column not found` errors
-Run the extra migration:
-```bash
-mysql -u root -p netatrack < python-admin/database_extra.sql
-```
+| Problem | Fix |
+|---------|-----|
+| `ModuleNotFoundError: transformers` | `pip install transformers torch` |
+| `ai()` returns empty string | Add at least one API key in Admin → Settings → AI APIs |
+| Push API `401 Unauthorized` | Check `admin_api_token` matches in both Python and PHP settings |
+| RSS feeds return empty | Some block bots — try adding a delay or different user-agent |
+| `Column not found` MySQL error | Run `mysql -u root -p netatrack < python-admin/database_extra.sql` |
 
 ---
 
@@ -544,8 +420,8 @@ MIT License — free to use, modify, and deploy.
 
 ---
 
-## Built by
-
-**David** — [github.com/david0154](https://github.com/david0154)
-
-> NetaTrack India — Making Indian politics transparent, one data point at a time. 🇮🇳
+<p align="center">
+  <img src="logo.png" width="80" alt="NetaTrack India"/><br/>
+  <b>Built by <a href="https://github.com/david0154">David</a></b><br/>
+  NetaTrack India — Making Indian politics transparent 🇮🇳
+</p>
