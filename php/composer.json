@@ -1,0 +1,26 @@
+{
+    "name": "david0154/netatrack-india",
+    "description": "NetaTrack India - Political Transparency Platform",
+    "type": "project",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*",
+        "ext-json": "*",
+        "ext-curl": "*",
+        "ext-mbstring": "*",
+        "phpmailer/phpmailer": "^6.9",
+        "predis/predis": "^2.2",
+        "intervention/image": "^2.7"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "NetaTrack\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}
