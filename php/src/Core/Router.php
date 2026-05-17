@@ -1,82 +1,118 @@
 <?php
 namespace NetaTrack\Core;
 
-class Router {
-    private array $routes;
+class Router
+{
+    private array $routes = [];
+    private array $middlewares = [];
+    private string $prefix = '';
 
-    public function __construct() {
-        $this->routes = require APP_PATH . '/config/routes.php';
+    public function get(string $path, $handler, array $middleware = []): void
+    {
+        $this->addRoute('GET', $path, $handler, $middleware);
     }
 
-    public function dispatch(): void {
-        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-        $uri = $this->normalizeUri($_SERVER['REQUEST_URI'] ?? '/');
+    public function post(string $path, $handler, array $middleware = []): void
+    {
+        $this->addRoute('POST', $path, $handler, $middleware);
+    }
 
-        foreach ($this->routes as $route => $handler) {
-            [$routeMethod, $routePath] = explode(' ', $route, 2);
-            $normalizedRoutePath = $this->normalizePath($routePath);
-            $pattern = preg_replace('/\{[^}]+\}/', '([^/]+)', $normalizedRoutePath);
-            $pattern = '#^' . $pattern . '$#';
+    public function put(string $path, $handler, array $middleware = []): void
+    {
+        $this->addRoute('PUT', $path, $handler, $middleware);
+    }
 
-            if ($method === $routeMethod && preg_match($pattern, $uri, $matches)) {
-                array_shift($matches);
-                [$controllerName, $action] = $handler;
-                $class = 'NetaTrack\\Controllers\\' . ltrim($controllerName, '\\');
+    public function delete(string $path, $handler, array $middleware = []): void
+    {
+        $this->addRoute('DELETE', $path, $handler, $middleware);
+    }
 
-                if (!class_exists($class)) {
-                    $this->abort(404, "Controller {$class} not found");
-                    return;
+    public function group(string $prefix, callable $callback, array $middleware = []): void
+    {
+        $prevPrefix = $this->prefix;
+        $this->prefix = $prevPrefix . $prefix;
+        $this->middlewares = array_merge($this->middlewares, $middleware);
+        $callback($this);
+        $this->prefix = $prevPrefix;
+    }
+
+    private function addRoute(string $method, string $path, $handler, array $middleware): void
+    {
+        $fullPath = $this->prefix . $path;
+        $this->routes[] = [
+            'method'     => $method,
+            'path'       => $fullPath,
+            'pattern'    => $this->pathToPattern($fullPath),
+            'handler'    => $handler,
+            'middleware' => array_merge($this->middlewares, $middleware),
+        ];
+    }
+
+    private function pathToPattern(string $path): string
+    {
+        $pattern = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<$1>[^/]+)', $path);
+        return '#^' . $pattern . '$#';
+    }
+
+    public function dispatch(): void
+    {
+        $method = $_SERVER['REQUEST_METHOD'];
+        $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        $uri = rtrim($uri, '/') ?: '/';
+
+        // Handle method override for forms
+        if ($method === 'POST' && isset($_POST['_method'])) {
+            $method = strtoupper($_POST['_method']);
+        }
+
+        foreach ($this->routes as $route) {
+            if ($route['method'] !== $method) continue;
+
+            if (preg_match($route['pattern'], $uri, $matches)) {
+                $params = array_filter($matches, 'is_string', ARRAY_FILTER_USE_KEY);
+
+                // Run middleware chain
+                foreach ($route['middleware'] as $mw) {
+                    $middlewareInstance = new $mw();
+                    $result = $middlewareInstance->handle(Request::getInstance(), function() {});
+                    if ($result === false) return;
                 }
 
-                $controller = new $class();
-                if (!method_exists($controller, $action)) {
-                    $this->abort(404, "Action {$action} not found in {$class}");
-                    return;
-                }
-
-                call_user_func_array([$controller, $action], $matches);
+                // Dispatch handler
+                $this->callHandler($route['handler'], $params);
                 return;
             }
         }
 
-        $this->abort(404, 'Route not found');
+        // 404
+        http_response_code(404);
+        if ($this->isApiRequest()) {
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Route not found', 'code' => 404]);
+        } else {
+            require ROOT_PATH . '/views/errors/404.php';
+        }
     }
 
-    private function normalizeUri(string $uri): string {
-        $path = strtok($uri, '?') ?: '/';
-        $path = preg_replace('#/+#', '/', $path);
-
-        if (str_starts_with($path, '/php/index.php')) {
-            $path = substr($path, strlen('/php/index.php')) ?: '/';
+    private function callHandler($handler, array $params): void
+    {
+        if (is_callable($handler)) {
+            call_user_func_array($handler, $params);
+        } elseif (is_string($handler) && str_contains($handler, '@')) {
+            [$class, $method] = explode('@', $handler);
+            $fullClass = 'NetaTrack\\Controllers\\' . $class;
+            $controller = new $fullClass();
+            call_user_func_array([$controller, $method], $params);
+        } elseif (is_array($handler) && count($handler) === 2) {
+            [$class, $method] = $handler;
+            $controller = new $class();
+            call_user_func_array([$controller, $method], $params);
         }
-        if (str_starts_with($path, '/index.php')) {
-            $path = substr($path, strlen('/index.php')) ?: '/';
-        }
-
-        return $this->normalizePath($path);
     }
 
-    private function normalizePath(string $path): string {
-        $path = '/' . trim($path, '/');
-        return $path === '/' ? '/' : rtrim($path, '/');
-    }
-
-    private function abort(int $code, string $message = ''): void {
-        http_response_code($code);
-
-        if (str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json')) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['error' => $message ?: 'Not Found', 'code' => $code], JSON_UNESCAPED_UNICODE);
-            return;
-        }
-
-        $title = $code . ' Error';
-        $viewFile = APP_PATH . "/views/errors/{$code}.php";
-        if (file_exists($viewFile)) {
-            require $viewFile;
-            return;
-        }
-
-        echo "<h1>{$code} Error</h1><p>" . htmlspecialchars($message ?: 'An error occurred', ENT_QUOTES, 'UTF-8') . "</p>";
+    private function isApiRequest(): bool
+    {
+        $uri = $_SERVER['REQUEST_URI'] ?? '';
+        return str_starts_with($uri, '/api/');
     }
 }

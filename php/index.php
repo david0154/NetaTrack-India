@@ -1,17 +1,17 @@
 <?php
 /**
- * NetaTrack India - Main Entry Point
- * Phase 1: Core Backend
+ * NetaTrack India - Front Controller
  */
 
-define('ROOT_PATH', dirname(__DIR__));
-define('APP_PATH', ROOT_PATH . '/php');
-define('VERSION', '1.0.0');
-define('APP_NAME', 'NetaTrack India');
+require_once __DIR__ . '/bootstrap.php';
 
-// Load bootstrap
-require_once APP_PATH . '/bootstrap.php';
+$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-// Start router
-$router = new \NetaTrack\Core\Router();
+// Route to API or Web
+if (str_starts_with($uri, '/api/')) {
+    $router = require __DIR__ . '/routes/api.php';
+} else {
+    $router = require __DIR__ . '/routes/web.php';
+}
+
 $router->dispatch();

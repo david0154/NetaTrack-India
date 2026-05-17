@@ -1,30 +1,36 @@
 <?php
 namespace NetaTrack\Models;
 
-use NetaTrack\Core\Model;
-use NetaTrack\Core\Database;
+class User extends BaseModel
+{
+    protected string $table = 'users';
 
-class User extends Model {
-    protected static string $table = 'users';
-
-    public static function findByEmail(string $email): ?array {
-        return Database::fetch("SELECT * FROM users WHERE email = ? LIMIT 1", [$email]);
+    public function findByEmail(string $email): array|false
+    {
+        return $this->db->selectOne(
+            'SELECT u.*, r.name as role_name, r.permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.email = ? LIMIT 1',
+            [$email]
+        );
     }
 
-    public static function create(array $data): int {
-        $data['password'] = password_hash($data['password'], PASSWORD_BCRYPT, ['cost' => 12]);
-        $data['credibility_score'] = 0;
-        $data['status'] = 'active';
-        return parent::create($data);
+    public function withRole(int $id): array|false
+    {
+        return $this->db->selectOne(
+            'SELECT u.*, r.name as role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = ?',
+            [$id]
+        );
     }
 
-    public static function verify(string $email, string $password): ?array {
-        $user = static::findByEmail($email);
-        if ($user && password_verify($password, $user['password'])) return $user;
-        return null;
+    public function getLeaderboard(int $limit = 10): array
+    {
+        return $this->db->select(
+            'SELECT id, name, credibility_score, approved_reports, state FROM users WHERE role_id = 4 ORDER BY credibility_score DESC LIMIT ?',
+            [$limit]
+        );
     }
 
-    public static function updateCredibility(int $userId, int $delta): void {
-        Database::query("UPDATE users SET credibility_score = credibility_score + ? WHERE id = ?", [$delta, $userId]);
+    public function incrementCredibility(int $userId, int $points = 1): void
+    {
+        $this->db->query('UPDATE users SET credibility_score = credibility_score + ?, approved_reports = approved_reports + 1 WHERE id = ?', [$points, $userId]);
     }
 }
