@@ -2,12 +2,6 @@
 namespace NetaTrack\Controllers;
 
 use NetaTrack\Core\Controller;
-use NetaTrack\Core\Database;
-use NetaTrack\Models\Leader;
-use NetaTrack\Models\Promise;
-use NetaTrack\Models\Project;
-use NetaTrack\Models\PublicReport;
-use NetaTrack\Models\Corruption;
 use NetaTrack\Models\User;
 
 class AuthController extends Controller {
@@ -17,8 +11,8 @@ class AuthController extends Controller {
 
     public function login(): void {
         if (!$this->verifyCsrf()) {
-            $this->view('auth.login', ['title' => 'Admin Login', 'error' => 'Invalid CSRF token.'], 'auth');
-            return;
+            $this->flash('error', 'Invalid CSRF token.');
+            $this->redirect('/login');
         }
 
         $email = trim((string)$this->input('email'));
@@ -26,15 +20,17 @@ class AuthController extends Controller {
 
         $user = User::verify($email, $password);
         if (!$user) {
-            $this->view('auth.login', ['title' => 'Admin Login', 'error' => 'Invalid credentials.'], 'auth');
-            return;
+            $this->flash('error', 'Invalid credentials.');
+            $this->redirect('/login');
         }
 
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['user_role'] = $user['role'];
         $_SESSION['user_email'] = $user['email'];
+        session_regenerate_id(true);
 
+        $this->flash('success', 'Welcome back, ' . $user['name'] . '.');
         $this->redirect('/admin');
     }
 
@@ -44,8 +40,8 @@ class AuthController extends Controller {
 
     public function register(): void {
         if (!$this->verifyCsrf()) {
-            $this->view('auth.register', ['title' => 'Create Account', 'error' => 'Invalid CSRF token.'], 'auth');
-            return;
+            $this->flash('error', 'Invalid CSRF token.');
+            $this->redirect('/register');
         }
 
         $name = trim((string)$this->input('name'));
@@ -53,13 +49,13 @@ class AuthController extends Controller {
         $password = (string)$this->input('password');
 
         if (!$name || !$email || !$password) {
-            $this->view('auth.register', ['title' => 'Create Account', 'error' => 'All fields are required.'], 'auth');
-            return;
+            $this->flash('error', 'All fields are required.');
+            $this->redirect('/register');
         }
 
         if (User::findByEmail($email)) {
-            $this->view('auth.register', ['title' => 'Create Account', 'error' => 'Email already exists.'], 'auth');
-            return;
+            $this->flash('error', 'Email already exists.');
+            $this->redirect('/register');
         }
 
         $id = User::create([
@@ -74,13 +70,21 @@ class AuthController extends Controller {
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['user_role'] = $user['role'];
         $_SESSION['user_email'] = $user['email'];
+        session_regenerate_id(true);
 
+        $this->flash('success', 'Admin account created successfully.');
         $this->redirect('/admin');
     }
 
     public function logout(): void {
         $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'] ?? '', $params['secure'] ?? false, $params['httponly'] ?? true);
+        }
         session_destroy();
+        session_start();
+        $_SESSION['flash']['success'][] = 'Logged out successfully.';
         $this->redirect('/login');
     }
 }

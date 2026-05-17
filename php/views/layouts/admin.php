@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= htmlspecialchars($title ?? 'NetaTrack India Admin') ?></title>
-    <link rel="stylesheet" href="/php/public/assets/css/admin.css">
+    <link rel="stylesheet" href="<?= htmlspecialchars($assetBase ?? '/php/public/assets') ?>/css/admin.css">
 </head>
 <body class="admin-body">
 <div class="admin-shell">
@@ -43,16 +43,19 @@
             </div>
         </header>
 
-        <?php if (!empty($_SESSION['flash_success'])): ?>
-            <div class="alert alert--success"><?= htmlspecialchars($_SESSION['flash_success']) ?></div>
-            <?php unset($_SESSION['flash_success']); ?>
-        <?php endif; ?>
+        <?php foreach (($_SESSION['flash']['success'] ?? []) as $message): ?>
+            <div class="alert alert--success"><?= htmlspecialchars($message) ?></div>
+        <?php endforeach; unset($_SESSION['flash']['success']); ?>
+
+        <?php foreach (($_SESSION['flash']['error'] ?? []) as $message): ?>
+            <div class="alert alert--danger"><?= htmlspecialchars($message) ?></div>
+        <?php endforeach; unset($_SESSION['flash']['error']); ?>
 
         <section class="content-area">
             <?= $content ?>
         </section>
     </main>
 </div>
-<script src="/php/public/assets/js/admin.js"></script>
+<script src="<?= htmlspecialchars($assetBase ?? '/php/public/assets') ?>/js/admin.js"></script>
 </body>
 </html>

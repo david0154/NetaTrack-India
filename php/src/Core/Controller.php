@@ -8,6 +8,11 @@ class Controller {
         if (!file_exists($viewFile)) {
             throw new \RuntimeException("View not found: $view");
         }
+
+        if (!isset($assetBase)) {
+            $assetBase = '/php/public/assets';
+        }
+
         ob_start();
         require $viewFile;
         $content = ob_get_clean();
@@ -36,8 +41,8 @@ class Controller {
         $this->redirect($_SERVER['HTTP_REFERER'] ?? '/');
     }
 
-    protected function isPost(): bool { return $_SERVER['REQUEST_METHOD'] === 'POST'; }
-    protected function isGet(): bool  { return $_SERVER['REQUEST_METHOD'] === 'GET';  }
+    protected function isPost(): bool { return ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'; }
+    protected function isGet(): bool  { return ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'; }
 
     protected function input(string $key, mixed $default = null): mixed {
         return $_POST[$key] ?? $_GET[$key] ?? $default;
@@ -56,19 +61,31 @@ class Controller {
 
     protected function verifyCsrf(): bool {
         $token = $_POST['_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        return hash_equals($_SESSION['csrf_token'] ?? '', $token);
+        return !empty($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
     }
 
     protected function requireAuth(): void {
         if (empty($_SESSION['user_id'])) {
+            $this->flash('error', 'Please login to continue.');
             $this->redirect('/login');
         }
     }
 
     protected function requireAdmin(): void {
-        if (empty($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'admin') {
+        if (empty($_SESSION['user_id']) || !in_array(($_SESSION['user_role'] ?? ''), ['admin', 'superadmin'], true)) {
+            $this->flash('error', 'Admin access required.');
             $this->redirect('/login');
         }
+    }
+
+    protected function flash(string $type, string $message): void {
+        $_SESSION['flash'][$type][] = $message;
+    }
+
+    protected function getFlash(string $type): array {
+        $messages = $_SESSION['flash'][$type] ?? [];
+        unset($_SESSION['flash'][$type]);
+        return $messages;
     }
 
     protected function paginate(string $sql, array $params = [], int $perPage = 20): array {
@@ -78,11 +95,11 @@ class Controller {
         $total = (int)(Database::fetch($countSql, $params)['total'] ?? 0);
         $items = Database::fetchAll("$sql LIMIT $perPage OFFSET $offset", $params);
         return [
-            'items'       => $items,
-            'total'       => $total,
-            'per_page'    => $perPage,
-            'current_page'=> $page,
-            'last_page'   => (int)ceil($total / $perPage),
+            'items' => $items,
+            'total' => $total,
+            'per_page' => $perPage,
+            'current_page' => $page,
+            'last_page' => (int)ceil($total / $perPage),
         ];
     }
 }
