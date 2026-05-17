@@ -19,13 +19,12 @@ $siteUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 
  * Run a .sql file using mysqli multi_query.
  * Returns error string or empty string on success.
  */
-function run_sql_file(string $host, int $port, string $user, string $pass, string $db, string $file): string {
+function run_sql_file(string $host, int $port, string $user, string $pass,
+                      string $db, string $file): string {
     if (!file_exists($file)) return "File not found: $file";
-
     $mysqli = new mysqli($host, $user, $pass, $db, $port);
     if ($mysqli->connect_errno) return 'Connect error: ' . $mysqli->connect_error;
     $mysqli->set_charset('utf8mb4');
-
     $sql = file_get_contents($file);
     if (!$mysqli->multi_query($sql)) {
         $err = $mysqli->error;
@@ -35,64 +34,98 @@ function run_sql_file(string $host, int $port, string $user, string $pass, strin
     do {
         if ($res = $mysqli->store_result()) $res->free();
     } while ($mysqli->more_results() && $mysqli->next_result());
-
     $err = $mysqli->error;
     $mysqli->close();
     return $err ?: '';
 }
 
 /**
- * Run a single SQL statement safely, ignoring duplicate column / table errors.
- * Used for the ALTER TABLE safety patch.
+ * Check if a column exists using INFORMATION_SCHEMA.
+ * Works on MySQL 5.6, 5.7, 8.0 — all shared hosting versions.
  */
-function safe_exec(mysqli $db, string $sql): void {
-    $db->query($sql); // errors 1060 (dup col) / 1061 (dup key) are fine
+function col_exists(mysqli $db, string $dbName, string $table, string $col): bool {
+    $res = $db->query(
+        "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = '" . $db->real_escape_string($dbName) . "'
+            AND TABLE_NAME   = '" . $db->real_escape_string($table)  . "'
+            AND COLUMN_NAME  = '" . $db->real_escape_string($col)    . "'
+         LIMIT 1"
+    );
+    return $res && $res->num_rows > 0;
+}
+
+/**
+ * Check if an index exists.
+ */
+function idx_exists(mysqli $db, string $dbName, string $table, string $idx): bool {
+    $res = $db->query(
+        "SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS
+          WHERE TABLE_SCHEMA = '" . $db->real_escape_string($dbName) . "'
+            AND TABLE_NAME   = '" . $db->real_escape_string($table)  . "'
+            AND INDEX_NAME   = '" . $db->real_escape_string($idx)    . "'
+         LIMIT 1"
+    );
+    return $res && $res->num_rows > 0;
 }
 
 /**
  * Patch any existing DB to have all columns the seed needs.
- * This runs BEFORE the seed so ALTER TABLE errors never block installation.
+ * Uses INFORMATION_SCHEMA to check before ALTER — no MySQL 8+ syntax needed.
  */
-function patch_schema(string $host, int $port, string $user, string $pass, string $db): string {
-    $mysqli = new mysqli($host, $user, $pass, $db, $port);
-    if ($mysqli->connect_errno) return 'Patch connect error: ' . $mysqli->connect_error;
-    $mysqli->set_charset('utf8mb4');
+function patch_schema(string $host, int $port, string $user, string $pass,
+                      string $dbName): string {
+    $db = new mysqli($host, $user, $pass, $dbName, $port);
+    if ($db->connect_errno) return 'Patch connect error: ' . $db->connect_error;
+    $db->set_charset('utf8mb4');
 
-    // parties — add color
-    safe_exec($mysqli, "ALTER TABLE parties ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT '#808080'");
+    // [ table, column, column_definition ]
+    $cols = [
+        // parties
+        ['parties', 'color',              "VARCHAR(20) NOT NULL DEFAULT '#3B82F6'"],
 
-    // states — add type and total_seats
-    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS type ENUM('state','ut') DEFAULT 'state'");
-    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS total_seats INT DEFAULT 0");
-    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS capital VARCHAR(100) DEFAULT NULL");
-    safe_exec($mysqli, "ALTER TABLE states ADD COLUMN IF NOT EXISTS region VARCHAR(80) DEFAULT NULL");
+        // states
+        ['states',  'type',               "ENUM('state','ut') NOT NULL DEFAULT 'state'"],
+        ['states',  'total_seats',        "INT NOT NULL DEFAULT 0"],
+        ['states',  'capital',            "VARCHAR(100) DEFAULT NULL"],
+        ['states',  'region',             "VARCHAR(80) DEFAULT NULL"],
 
-    // leaders — add all score + meta columns
-    $leader_cols = [
-        "slug VARCHAR(200) DEFAULT NULL",
-        "constituency VARCHAR(200) DEFAULT NULL",
-        "role VARCHAR(200) DEFAULT NULL",
-        "photo_url VARCHAR(500) DEFAULT NULL",
-        "dob DATE DEFAULT NULL",
-        "education TEXT DEFAULT NULL",
-        "total_score DECIMAL(5,2) DEFAULT 0",
-        "attendance_score DECIMAL(5,2) DEFAULT 0",
-        "promise_score DECIMAL(5,2) DEFAULT 0",
-        "criminal_score DECIMAL(5,2) DEFAULT 0",
-        "fund_score DECIMAL(5,2) DEFAULT 0",
-        "transparency_score DECIMAL(5,2) DEFAULT 0",
-        "verified TINYINT(1) DEFAULT 0",
-        "status ENUM('active','inactive','banned') DEFAULT 'active'",
+        // leaders
+        ['leaders', 'slug',               "VARCHAR(200) DEFAULT NULL"],
+        ['leaders', 'constituency',       "VARCHAR(200) DEFAULT NULL"],
+        ['leaders', 'role',               "VARCHAR(200) DEFAULT NULL"],
+        ['leaders', 'photo_url',          "VARCHAR(500) DEFAULT NULL"],
+        ['leaders', 'dob',                "DATE DEFAULT NULL"],
+        ['leaders', 'education',          "TEXT DEFAULT NULL"],
+        ['leaders', 'total_score',        "DECIMAL(5,2) NOT NULL DEFAULT 0"],
+        ['leaders', 'attendance_score',   "DECIMAL(5,2) NOT NULL DEFAULT 0"],
+        ['leaders', 'promise_score',      "DECIMAL(5,2) NOT NULL DEFAULT 0"],
+        ['leaders', 'criminal_score',     "DECIMAL(5,2) NOT NULL DEFAULT 0"],
+        ['leaders', 'fund_score',         "DECIMAL(5,2) NOT NULL DEFAULT 0"],
+        ['leaders', 'transparency_score', "DECIMAL(5,2) NOT NULL DEFAULT 0"],
+        ['leaders', 'verified',           "TINYINT(1) NOT NULL DEFAULT 0"],
+        ['leaders', 'status',             "ENUM('active','inactive','banned') NOT NULL DEFAULT 'active'"],
     ];
-    foreach ($leader_cols as $col_def) {
-        $col_name = explode(' ', trim($col_def))[0];
-        safe_exec($mysqli, "ALTER TABLE leaders ADD COLUMN IF NOT EXISTS $col_def");
+
+    foreach ($cols as [$tbl, $col, $def]) {
+        if (!col_exists($db, $dbName, $tbl, $col)) {
+            if (!$db->query("ALTER TABLE `$tbl` ADD COLUMN `$col` $def")) {
+                // Error 1060 = duplicate column (race condition) — safe to ignore
+                if ($db->errno !== 1060) {
+                    $err = $db->error;
+                    $db->close();
+                    return "Patch failed ($tbl.$col): $err";
+                }
+            }
+        }
     }
 
-    // Add unique index on leaders.slug (ignore if exists)
-    safe_exec($mysqli, "ALTER TABLE leaders ADD UNIQUE INDEX IF NOT EXISTS idx_leaders_slug (slug)");
+    // Unique index on leaders.slug
+    if (!idx_exists($db, $dbName, 'leaders', 'idx_leaders_slug')) {
+        // Ignore error 1061 (duplicate key name)
+        $db->query("ALTER TABLE `leaders` ADD UNIQUE INDEX `idx_leaders_slug` (`slug`)");
+    }
 
-    $mysqli->close();
+    $db->close();
     return '';
 }
 
@@ -107,48 +140,49 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $aEmail = trim($_POST['admin_email'] ?? '');
     $aPass  = trim($_POST['admin_pass']  ?? '');
 
-    if (!$dbName || !$dbUser)       $error = 'Database name and username are required.';
-    elseif (!$aEmail)               $error = 'Admin email is required.';
-    elseif (strlen($aPass) < 6)    $error = 'Admin password must be at least 6 characters.';
+    if (!$dbName || !$dbUser)    $error = 'Database name and username are required.';
+    elseif (!$aEmail)            $error = 'Admin email is required.';
+    elseif (strlen($aPass) < 6) $error = 'Admin password must be at least 6 characters.';
     else {
         try {
-            // Step A: Create the database
+            // A: Create database
             $pdo0 = new PDO(
                 "mysql:host=$dbHost;port=$dbPort;charset=utf8mb4",
                 $dbUser, $dbPass,
                 [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
             );
-            $pdo0->exec("CREATE DATABASE IF NOT EXISTS `$dbName` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            $pdo0->exec("CREATE DATABASE IF NOT EXISTS `$dbName`
+                         CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
             $pdo0 = null;
 
-            // Step B: Run schema.sql (creates tables)
-            $e = run_sql_file($dbHost, $dbPort, $dbUser, $dbPass, $dbName, $root . '/installer/schema.sql');
-            if ($e) throw new RuntimeException('Schema error: ' . $e);
+            // B: Run schema.sql
+            $e = run_sql_file($dbHost,$dbPort,$dbUser,$dbPass,$dbName,
+                              $root.'/installer/schema.sql');
+            if ($e) throw new RuntimeException('Schema error: '.$e);
 
-            // Step C: Safety ALTER TABLE patch — ensures all columns exist
-            // even if an OLD schema.sql was already on the server
-            $e = patch_schema($dbHost, $dbPort, $dbUser, $dbPass, $dbName);
+            // C: Patch missing columns (INFORMATION_SCHEMA check — MySQL 5.6/5.7/8 safe)
+            $e = patch_schema($dbHost,$dbPort,$dbUser,$dbPass,$dbName);
             if ($e) throw new RuntimeException($e);
 
-            // Step D: Run seed (parties, states, leaders)
-            $e = run_sql_file($dbHost, $dbPort, $dbUser, $dbPass, $dbName, $root . '/database/seed_states_leaders.sql');
-            if ($e) throw new RuntimeException('Seed error: ' . $e);
+            // D: Run seed
+            $e = run_sql_file($dbHost,$dbPort,$dbUser,$dbPass,$dbName,
+                              $root.'/database/seed_states_leaders.sql');
+            if ($e) throw new RuntimeException('Seed error: '.$e);
 
-            // Step E: Fresh PDO for admin user + settings inserts
+            // E: PDO for settings + admin user
             $pdo = new PDO(
                 "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=utf8mb4",
                 $dbUser, $dbPass,
                 [
-                    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_EMULATE_PREPARES   => true,
+                    PDO::ATTR_ERRMODE                  => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_EMULATE_PREPARES         => true,
                     PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,
                 ]
             );
 
             $token = gen_token();
 
-            // Write .env file
-            $envContent = implode("\n", [
+            file_put_contents($root.'/.env', implode("\n", [
                 "APP_NAME=NetaTrack India",
                 "APP_URL=$siteUrl",
                 "APP_ENV=production",
@@ -160,30 +194,31 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 "ADMIN_API_TOKEN=$token",
                 "GEMINI_KEY=",
                 "SARVAM_KEY=",
-            ]) . "\n";
-            file_put_contents($root . '/.env', $envContent);
+            ])."\n");
 
-            // Settings inserts
-            $ins = $pdo->prepare("INSERT IGNORE INTO settings (`key`, value, type, group_name, label) VALUES (?, ?, 'string', 'general', ?)");
+            $ins = $pdo->prepare(
+                "INSERT IGNORE INTO settings (`key`,value,type,group_name,label)
+                 VALUES (?,?,'string','general',?)"
+            );
             foreach ([
-                ['admin_api_token', $token,            'Admin API Token'],
-                ['site_url',        $siteUrl,          'Site URL'],
-                ['site_name',       'NetaTrack India', 'Site Name'],
-            ] as [$k, $v, $l]) {
-                try { $ins->execute([$k, $v, $l]); } catch (PDOException $e) {}
+                ['admin_api_token',$token,'Admin API Token'],
+                ['site_url',$siteUrl,'Site URL'],
+                ['site_name','NetaTrack India','Site Name'],
+            ] as [$k,$v,$l]) {
+                try { $ins->execute([$k,$v,$l]); } catch (PDOException $e) {}
             }
 
-            // Admin user
             $pdo->prepare(
-                "INSERT IGNORE INTO users (name, email, password_hash, role_id) VALUES (?, ?, ?, 1)"
-            )->execute([$aName, $aEmail, password_hash($aPass, PASSWORD_BCRYPT)]);
+                "INSERT IGNORE INTO users (name,email,password_hash,role_id)
+                 VALUES (?,?,?,1)"
+            )->execute([$aName,$aEmail,password_hash($aPass,PASSWORD_BCRYPT)]);
 
             $step = 3;
 
         } catch (PDOException $e) {
-            $error = 'Database error: ' . $e->getMessage();
+            $error = 'Database error: '.$e->getMessage();
         } catch (Throwable $e) {
-            $error = 'Error: ' . $e->getMessage();
+            $error = 'Error: '.$e->getMessage();
         }
     }
 }
@@ -195,9 +230,9 @@ $reqs = [
     ['mysqli',       extension_loaded('mysqli'),      'required',  true],
     ['cURL',         extension_loaded('curl'),        'optional',  false],
     ['mbstring',     extension_loaded('mbstring'),    'optional',  false],
-    ['Folder write', is_writable($root) || is_writable($root . '/.env'), 'needed', true],
+    ['Folder write', is_writable($root)||is_writable($root.'/.env'), 'needed', true],
 ];
-$allOk = !in_array(false, array_map(fn($r) => $r[1] || !$r[3], $reqs));
+$allOk = !in_array(false, array_map(fn($r)=>$r[1]||!$r[3], $reqs));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -260,7 +295,7 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
   </div>
 
   <div class="steps">
-    <?php foreach (['Requirements', 'Setup', 'Done'] as $i => $s): ?>
+    <?php foreach (['Requirements','Setup','Done'] as $i=>$s): ?>
     <div class="step <?= $step===$i+1?'active':($step>$i+1?'done':'') ?>">
       <span class="n"><?= $step>$i+1?'✓':$i+1 ?></span><?= $s ?>
     </div>
@@ -269,20 +304,18 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
 
   <div class="body">
 
-  <?php if ($step === 1): ?>
-
+  <?php if ($step===1): ?>
     <h3>Server Requirements</h3>
-    <?php foreach ($reqs as [$label, $ok, $note, $req]): ?>
+    <?php foreach ($reqs as [$label,$ok,$note,$req]): ?>
     <div class="req">
       <span style="color:#cbd5e1"><?= htmlspecialchars($label) ?>
         <span style="color:#475569;font-size:.75rem">(<?= $note ?>)</span>
       </span>
       <span class="<?= $ok?'ok':($req?'fail':'opt') ?>">
-        <?= $ok ? '✓ OK' : ($req ? '✗ Required' : '⚠ Optional') ?>
+        <?= $ok?'✓ OK':($req?'✗ Required':'⚠ Optional') ?>
       </span>
     </div>
     <?php endforeach ?>
-
     <div style="margin-top:18px">
       <?php if ($allOk): ?>
         <a href="?step=2" class="btn">Continue →</a>
@@ -292,24 +325,17 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
       <?php endif ?>
     </div>
 
-  <?php elseif ($step === 2): ?>
-
+  <?php elseif ($step===2): ?>
     <?php if ($error): ?>
     <div class="alert err"><?= htmlspecialchars($error) ?></div>
     <?php endif ?>
-
     <form method="POST" action="?step=2">
-      <h3>🗄️ Database
-        <span style="font-weight:400">— cPanel → MySQL Databases</span>
-      </h3>
-
+      <h3>🗄️ Database <span style="font-weight:400">— cPanel → MySQL Databases</span></h3>
       <label>Database Host</label>
       <input name="db_host" value="localhost">
       <div class="hint">Use <strong style="color:#cbd5e1">localhost</strong> on shared hosting</div>
-
       <label>Database Name</label>
       <input name="db_name" placeholder="e.g. u123456_netatrack" required>
-
       <div class="grid">
         <div>
           <label>DB Username</label>
@@ -320,36 +346,28 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
           <input type="password" name="db_pass" placeholder="••••••">
         </div>
       </div>
-
       <h3 style="margin-top:4px">👤 Admin Account</h3>
-
       <label>Your Name</label>
       <input name="admin_name" value="Admin" required>
-
       <label>Admin Email</label>
       <input type="email" name="admin_email" placeholder="you@example.com" required>
-
       <label>Admin Password <span style="color:#475569;font-weight:400">(min 6 chars)</span></label>
       <input type="password" name="admin_pass" placeholder="••••••" minlength="6" required>
-
       <button type="submit" class="btn">🚀 Install Now</button>
     </form>
 
-  <?php elseif ($step === 3): ?>
-
+  <?php elseif ($step===3): ?>
     <div style="text-align:center;padding:8px 0 18px">
       <div style="font-size:3rem;margin-bottom:8px">🎉</div>
       <h2 style="margin-bottom:6px">Installation Complete!</h2>
       <p style="color:#64748b;font-size:.9rem">NetaTrack India is ready.</p>
     </div>
-
     <div class="alert ok">
       ✓ Database &amp; all tables created<br>
       ✓ States &amp; leaders seeded<br>
       ✓ Admin account created<br>
       ✓ API token generated
     </div>
-
     <label style="color:#94a3b8;font-size:.82rem;display:block;margin-bottom:6px">
       🔑 Admin API Token <span style="color:#475569">(save — needed for Python app)</span>
     </label>
@@ -363,18 +381,15 @@ input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
     <div style="font-size:.75rem;color:#475569;margin-bottom:16px">
       Python app → .env → API_KEY=paste here
     </div>
-
     <div class="btns">
       <a href="/admin" class="btn2 primary">🏗 Admin Panel</a>
-      <a href="/"      class="btn2">🌐 View Site</a>
+      <a href="/" class="btn2">🌐 View Site</a>
     </div>
-
     <div class="alert warn" style="margin-top:14px;font-size:.82rem">
       ⚠️ Delete the
       <code style="background:#1e293b;padding:1px 5px;border-radius:3px">installer/</code>
-      folder from your server after this!
+      folder after this!
     </div>
-
   <?php endif ?>
   </div>
 
