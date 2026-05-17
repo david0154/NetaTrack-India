@@ -3,7 +3,6 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS roles (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(60) NOT NULL UNIQUE,
@@ -17,7 +16,6 @@ INSERT IGNORE INTO roles (name, permissions) VALUES
   ('moderator',   '["reports"]'),
   ('viewer',      '["read"]');
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
@@ -36,7 +34,6 @@ CREATE TABLE IF NOT EXISTS users (
     FOREIGN KEY (role_id) REFERENCES roles(id)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS parties (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(150) NOT NULL UNIQUE,
@@ -50,7 +47,6 @@ CREATE TABLE IF NOT EXISTS parties (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS states (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE,
@@ -63,7 +59,6 @@ CREATE TABLE IF NOT EXISTS states (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS leaders (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
@@ -78,7 +73,6 @@ CREATE TABLE IF NOT EXISTS leaders (
     birth_date DATE DEFAULT NULL,
     education TEXT DEFAULT NULL,
     bio TEXT DEFAULT NULL,
-    -- Scoring columns
     total_score DECIMAL(5,2) DEFAULT 0,
     attendance_score DECIMAL(5,2) DEFAULT 0,
     promise_score DECIMAL(5,2) DEFAULT 0,
@@ -90,11 +84,9 @@ CREATE TABLE IF NOT EXISTS leaders (
     final_score DECIMAL(5,2) DEFAULT 0,
     corruption_level INT DEFAULT 0,
     rank_label VARCHAR(20) DEFAULT 'Unranked',
-    -- Social
     social_twitter VARCHAR(255) DEFAULT NULL,
     social_facebook VARCHAR(255) DEFAULT NULL,
     official_website VARCHAR(500) DEFAULT NULL,
-    -- Status
     verified TINYINT(1) DEFAULT 0,
     status ENUM('active','inactive','banned') DEFAULT 'active',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -104,18 +96,6 @@ CREATE TABLE IF NOT EXISTS leaders (
     FOREIGN KEY (state_id) REFERENCES states(id)
 );
 
--- Auto-generate slug from name on insert if not provided
-DELIMITER ;;
-CREATE TRIGGER IF NOT EXISTS before_leader_insert
-BEFORE INSERT ON leaders FOR EACH ROW
-BEGIN
-    IF NEW.slug IS NULL OR NEW.slug = '' THEN
-        SET NEW.slug = LOWER(REPLACE(REPLACE(NEW.name, ' ', '-'), '.', ''));
-    END IF;
-END;;
-DELIMITER ;
-
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS projects (
     id INT AUTO_INCREMENT PRIMARY KEY,
     slug VARCHAR(200) NOT NULL UNIQUE,
@@ -139,7 +119,6 @@ CREATE TABLE IF NOT EXISTS projects (
     FOREIGN KEY (leader_id) REFERENCES leaders(id)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS promises (
     id INT AUTO_INCREMENT PRIMARY KEY,
     slug VARCHAR(200) NOT NULL UNIQUE,
@@ -161,7 +140,6 @@ CREATE TABLE IF NOT EXISTS promises (
     FOREIGN KEY (state_id) REFERENCES states(id)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public_submissions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(300) NOT NULL,
@@ -184,7 +162,6 @@ CREATE TABLE IF NOT EXISTS public_submissions (
     FOREIGN KEY (leader_id) REFERENCES leaders(id)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS media (
     id INT AUTO_INCREMENT PRIMARY KEY,
     filename VARCHAR(300) NOT NULL,
@@ -199,7 +176,6 @@ CREATE TABLE IF NOT EXISTS media (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS corruption_cases (
     id INT AUTO_INCREMENT PRIMARY KEY,
     leader_id INT DEFAULT NULL,
@@ -217,7 +193,6 @@ CREATE TABLE IF NOT EXISTS corruption_cases (
     FOREIGN KEY (leader_id) REFERENCES leaders(id)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS scraper_sources (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
@@ -230,7 +205,6 @@ CREATE TABLE IF NOT EXISTS scraper_sources (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS analytics (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_type VARCHAR(100) NOT NULL,
@@ -245,7 +219,6 @@ CREATE TABLE IF NOT EXISTS analytics (
     INDEX idx_created (created_at)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS settings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     `key` VARCHAR(100) NOT NULL UNIQUE,
@@ -257,18 +230,17 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 INSERT IGNORE INTO settings (`key`, value, type, group_name, label) VALUES
-  ('site_name',             'NetaTrack India',                  'string',  'general',   'Site Name'),
-  ('site_tagline',          'Political Transparency Platform',  'string',  'general',   'Tagline'),
-  ('site_email',            'admin@netatrack.in',               'string',  'general',   'Admin Email'),
-  ('maintenance_mode',      'false',                            'boolean', 'general',   'Maintenance Mode'),
-  ('gemini_api_key',        '',                                 'string',  'ai',        'Gemini API Key'),
-  ('openai_api_key',        '',                                 'string',  'ai',        'OpenAI API Key'),
-  ('sarvam_api_key',        '',                                 'string',  'ai',        'Sarvam AI Key'),
-  ('ai_confidence_threshold','75',                              'integer', 'ai',        'Min AI Confidence'),
-  ('theme_primary_color',   '#f97316',                          'string',  'theme',     'Primary Color'),
-  ('dark_mode_default',     'true',                             'boolean', 'theme',     'Dark Mode Default');
+  ('site_name',              'NetaTrack India',                 'string',  'general', 'Site Name'),
+  ('site_tagline',           'Political Transparency Platform', 'string',  'general', 'Tagline'),
+  ('site_email',             'admin@netatrack.in',              'string',  'general', 'Admin Email'),
+  ('maintenance_mode',       'false',                           'boolean', 'general', 'Maintenance Mode'),
+  ('gemini_api_key',         '',                                'string',  'ai',      'Gemini API Key'),
+  ('openai_api_key',         '',                                'string',  'ai',      'OpenAI API Key'),
+  ('sarvam_api_key',         '',                                'string',  'ai',      'Sarvam AI Key'),
+  ('ai_confidence_threshold','75',                              'integer', 'ai',      'Min AI Confidence'),
+  ('theme_primary_color',    '#f97316',                         'string',  'theme',   'Primary Color'),
+  ('dark_mode_default',      'true',                            'boolean', 'theme',   'Dark Mode Default');
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sponsors (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
@@ -294,7 +266,6 @@ CREATE TABLE IF NOT EXISTS advertisements (
     FOREIGN KEY (sponsor_id) REFERENCES sponsors(id)
 );
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS seo_settings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     page_path VARCHAR(300) NOT NULL UNIQUE,
@@ -311,7 +282,6 @@ INSERT IGNORE INTO seo_settings (page_path, title, description) VALUES
   ('/promises','Promises | NetaTrack India','Track political promises and their fulfilment'),
   ('/submit','Submit Report | NetaTrack India','Submit corruption reports for verification');
 
--- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS api_keys (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
