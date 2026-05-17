@@ -1,77 +1,83 @@
 <?php
 /**
- * NetaTrack India - Application Bootstrap
- * Initializes autoloading, constants, and core services
+ * NetaTrack India — Bootstrap
+ * Loaded by index.php before routing.
  */
 
-declare(strict_types=1);
+define('BASE_PATH', __DIR__);
+define('START_TIME', microtime(true));
 
-define('ROOT_PATH', __DIR__);
-define('VIEWS_PATH', ROOT_PATH . '/views');
-define('STORAGE_PATH', ROOT_PATH . '/storage');
-define('UPLOAD_PATH', STORAGE_PATH . '/uploads');
-define('APP_START', microtime(true));
-
-// Load .env
-if (file_exists(ROOT_PATH . '/.env')) {
-    $lines = file(ROOT_PATH . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        if (str_starts_with(trim($line), '#')) continue;
-        if (str_contains($line, '=')) {
-            [$key, $val] = explode('=', $line, 2);
-            putenv(trim($key) . '=' . trim($val));
-            $_ENV[trim($key)] = trim($val);
+// ---- Autoloader ----
+if (file_exists(__DIR__.'/vendor/autoload.php')) {
+    require __DIR__.'/vendor/autoload.php';
+} else {
+    // Fallback PSR-4 autoloader
+    spl_autoload_register(function(string $class) {
+        $map = [
+            'NetaTrack\\' => __DIR__.'/src/',
+        ];
+        foreach ($map as $prefix => $base) {
+            if (!str_starts_with($class, $prefix)) continue;
+            $rel  = str_replace('\\', '/', substr($class, strlen($prefix)));
+            $file = $base . $rel . '.php';
+            if (file_exists($file)) { require $file; return; }
         }
+    });
+}
+
+// ---- Environment ----
+if (file_exists(__DIR__.'/.env')) {
+    foreach (file(__DIR__.'/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) continue;
+        [$k, $v] = array_pad(explode('=', $line, 2), 2, '');
+        $k = trim($k); $v = trim($v, '"\' ');
+        if (!getenv($k)) { putenv("$k=$v"); $_ENV[$k] = $v; }
     }
 }
 
-define('APP_DEBUG', (bool)(getenv('APP_DEBUG') ?: false));
+if (!function_exists('env')) {
+    function env(string $key, mixed $default = null): mixed
+    {
+        $val = $_ENV[$key] ?? getenv($key);
+        return ($val !== false && $val !== '') ? $val : $default;
+    }
+}
 
-// Error handling
-if (APP_DEBUG) {
-    error_reporting(E_ALL);
-    ini_set('display_errors', '1');
-} else {
-    error_reporting(0);
-    ini_set('display_errors', '0');
-    set_error_handler(function($errno, $errstr, $errfile, $errline) {
-        error_log("[$errno] $errstr in $errfile:$errline");
-    });
+// ---- Load helpers ----
+require __DIR__.'/src/Core/helpers.php';
+
+// ---- Session ----
+if (session_status() === PHP_SESSION_NONE) {
+    $secure   = env('SESSION_SECURE', 'true') === 'true';
+    $lifetime = (int)env('SESSION_LIFETIME', 120) * 60;
+    session_set_cookie_params([
+        'lifetime' => $lifetime,
+        'path'     => '/',
+        'secure'   => $secure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_name('netatrack_sess');
+    session_start();
+}
+
+// ---- Timezone ----
+date_default_timezone_set(env('APP_TIMEZONE', 'Asia/Kolkata'));
+
+// ---- Error handling ----
+$debug = env('APP_DEBUG', 'false') === 'true';
+ini_set('display_errors', $debug ? '1' : '0');
+error_reporting($debug ? E_ALL : E_ERROR | E_PARSE);
+
+if (!$debug) {
     set_exception_handler(function(\Throwable $e) {
-        error_log('[EXCEPTION] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        error_log('[NetaTrack] Exception: '.$e->getMessage().' in '.$e->getFile().':'.$e->getLine());
         http_response_code(500);
-        if (str_starts_with($_SERVER['REQUEST_URI'] ?? '', '/api/')) {
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Internal server error']);
-        } else {
-            require ROOT_PATH . '/views/errors/500.php';
-        }
+        require BASE_PATH.'/views/errors/500.php';
         exit;
     });
 }
 
-// Autoloader
-if (file_exists(ROOT_PATH . '/vendor/autoload.php')) {
-    require ROOT_PATH . '/vendor/autoload.php';
-} else {
-    // Simple PSR-4 autoloader fallback
-    spl_autoload_register(function(string $class) {
-        $class = str_replace('NetaTrack\\', '', $class);
-        $path = ROOT_PATH . '/src/' . str_replace('\\', '/', $class) . '.php';
-        if (file_exists($path)) require_once $path;
-    });
-}
-
-require ROOT_PATH . '/src/Helpers/Helpers.php';
-
-// Initialize Auth & Session
-$auth = \NetaTrack\Core\Auth::getInstance();
-$auth->init();
-
-// Set timezone
-date_default_timezone_set('Asia/Kolkata');
-
-// Create required directories
-foreach ([STORAGE_PATH, UPLOAD_PATH, STORAGE_PATH.'/cache', STORAGE_PATH.'/logs'] as $dir) {
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
-}
+// ---- Load routes ----
+require __DIR__.'/routes/web.php';
