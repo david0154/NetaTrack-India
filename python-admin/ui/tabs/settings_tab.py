@@ -1,3 +1,4 @@
+"""Admin Settings Tab — all keys including multi-AI + push API token."""
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -23,19 +24,24 @@ class SettingsTab:
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
         self.inner = inner
 
-    def _section(self, title):
+    def _section(self, title, color="#3b82f6"):
         tk.Label(self.inner, text=title, font=("Segoe UI", 11, "bold"),
-                 bg="#0f172a", fg="#3b82f6").pack(anchor="w", pady=(16, 6))
-        sep = tk.Frame(self.inner, bg="#1e293b", height=1)
-        sep.pack(fill="x", pady=(0, 8))
+                 bg="#0f172a", fg=color).pack(anchor="w", pady=(18, 5))
+        tk.Frame(self.inner, bg="#1e293b", height=1).pack(fill="x", pady=(0, 8))
 
-    def _field(self, label, key, secret=False, wide=False):
-        tk.Label(self.inner, text=label, bg="#0f172a", fg="#94a3b8",
-                 font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 1))
+    def _field(self, label, key, secret=False, hint=""):
+        row = tk.Frame(self.inner, bg="#0f172a")
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text=label, bg="#0f172a", fg="#94a3b8",
+                 font=("Segoe UI", 9), width=22, anchor="w").pack(side="left")
         var = tk.StringVar()
         self._vars[key] = var
-        ttk.Entry(self.inner, textvariable=var, show="*" if secret else "",
-                  font=("Segoe UI", 10), width=70 if wide else 40).pack(anchor="w", fill="x")
+        e = ttk.Entry(row, textvariable=var, show="*" if secret else "",
+                      font=("Segoe UI", 10))
+        e.pack(side="left", fill="x", expand=True)
+        if hint:
+            tk.Label(row, text=hint, bg="#0f172a", fg="#334155",
+                     font=("Segoe UI", 8)).pack(side="left", padx=6)
 
     def load(self):
         for w in self.inner.winfo_children():
@@ -46,32 +52,54 @@ class SettingsTab:
             data = {r["key"]: r["value"] for r in rows}
 
             self._section("🌐 General")
-            for label, key in [("Site Name","site_name"),("Tagline","site_tagline"),("Site URL","site_url"),("Logo URL","site_logo"),("Meta Description","meta_description")]:
-                self._field(label, key, wide=True)
+            for lbl, key in [("Site Name","site_name"),("Tagline","site_tagline"),
+                              ("Site URL","site_url"),("Logo URL","site_logo"),
+                              ("Meta Description","meta_description")]:
+                self._field(lbl, key)
                 self._vars[key].set(data.get(key, ""))
 
-            self._section("🤖 AI Keys")
-            for label, key in [("Gemini API Key","gemini_api_key"),("Sarvam AI Key","sarvam_api_key")]:
-                self._field(label, key, secret=True)
+            self._section("🤖 AI APIs — add any, engine auto-selects", "#f97316")
+            tk.Label(self.inner,
+                     text="Add any API keys you have. Engine tries Gemini → OpenAI → OpenRouter → Claude → Sarvam in order.",
+                     bg="#0f172a", fg="#64748b", font=("Segoe UI", 9), wraplength=600).pack(anchor="w", pady=(0,8))
+            for lbl, key, hint in [
+                ("Gemini API Key",      "gemini_api_key",     "AIza..."),
+                ("OpenAI API Key",      "openai_api_key",     "sk-..."),
+                ("OpenRouter API Key",  "openrouter_api_key", "sk-or-..."),
+                ("Claude API Key",      "claude_api_key",     "sk-ant-..."),
+                ("Sarvam AI Key",       "sarvam_api_key",     "sarvam-..."),
+            ]:
+                self._field(lbl, key, secret=True, hint=hint)
+                self._vars[key].set(data.get(key, ""))
+
+            self._section("🌐 Push API (Python → Website)", "#22c55e")
+            tk.Label(self.inner,
+                     text="The Python admin app uses these to push data directly to your live site.",
+                     bg="#0f172a", fg="#64748b", font=("Segoe UI", 9)).pack(anchor="w", pady=(0,8))
+            for lbl, key in [("Site URL","site_url"),("Admin API Token","admin_api_token")]:
+                self._field(lbl, key, secret=(key=="admin_api_token"), hint="auto-generated on install" if key=="admin_api_token" else "")
                 self._vars[key].set(data.get(key, ""))
 
             self._section("📊 Analytics & Ads")
-            for label, key in [("Google Analytics ID","google_analytics_id"),("Google AdSense Code","google_adsense_code")]:
-                self._field(label, key, wide=True)
+            for lbl, key in [("Google Analytics ID","google_analytics_id"),("Google AdSense Code","google_adsense_code")]:
+                self._field(lbl, key)
                 self._vars[key].set(data.get(key, ""))
 
             self._section("📣 Sponsor & Announcement")
-            for label, key in [("Sponsor Title","sponsor_title"),("Sponsor HTML","sponsor_html"),("Announcement Text","announcement_text"),("Announcement Link","announcement_link")]:
-                self._field(label, key, wide=True)
+            for lbl, key in [("Sponsor Title","sponsor_title"),("Sponsor HTML","sponsor_html"),
+                              ("Announcement Text","announcement_text"),("Announcement Link","announcement_link")]:
+                self._field(lbl, key)
                 self._vars[key].set(data.get(key, ""))
 
-            self._section("📧 SMTP")
-            for label, key in [("SMTP Host","smtp_host"),("SMTP Port","smtp_port"),("SMTP User","smtp_user"),("SMTP Password","smtp_pass")]:
-                self._field(label, key, secret=(key=="smtp_pass"))
+            self._section("📧 SMTP Email")
+            for lbl, key in [("SMTP Host","smtp_host"),("SMTP Port","smtp_port"),
+                              ("SMTP User","smtp_user"),("SMTP Pass","smtp_pass")]:
+                self._field(lbl, key, secret=(key=="smtp_pass"))
                 self._vars[key].set(data.get(key, ""))
 
-            tk.Button(self.inner, text="💾 Save All Settings", bg="#3b82f6", fg="white",
-                      relief="flat", font=("Segoe UI", 11, "bold"), cursor="hand2",
+            tk.Button(self.inner, text="💾  Save All Settings",
+                      bg="#3b82f6", fg="white", relief="flat",
+                      font=("Segoe UI", 11, "bold"), cursor="hand2",
                       command=self._save, padx=20, pady=10).pack(pady=(20, 8), anchor="w")
             self.set_status("⚙️ Settings loaded", "#94a3b8")
         except Exception as e:
@@ -85,6 +113,6 @@ class SettingsTab:
                     (key, var.get(), var.get())
                 )
             self.set_status("✅ Settings saved!", "#22c55e")
-            messagebox.showinfo("Saved", "All settings saved successfully.")
+            messagebox.showinfo("Saved", "All settings saved.")
         except Exception as e:
             messagebox.showerror("Error", str(e))
